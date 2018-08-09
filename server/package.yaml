@@ -22,12 +22,19 @@ description:         Please see the README on GitHub at <https://github.com/gith
 dependencies:
 - aeson
 - base >= 4.7 && < 5
+- bytestring
 - containers
 - mtl
 - random
 - random-shuffle
+- servant
+- servant-client
+- servant-server
+- text
+- time
 - transformers
 - uuid
+- warp
 
 library:
   source-dirs: src

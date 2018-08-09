@@ -1,39 +1,34 @@
 module Game where
 
-import           Control.Monad.IO.Class     (liftIO)
-import           Control.Monad.Trans.Except (ExceptT, runExceptT)
-import           Control.Monad.Trans.State  (StateT, get, runStateT)
-import           Data.IORef                 (IORef, newIORef)
-import qualified Data.Set                   as S
-import           Data.UUID                  (UUID)
+import           Control.Monad.IO.Class    (liftIO)
+import           Control.Monad.Trans.State (get, modify')
+import qualified Data.Set                  as S
+import           Data.UUID                 (UUID)
+
 
 import           Data.GameState
-
-data GameError
-  = InvalidAction Player Action
-  deriving (Eq, Show)
-
-type App = StateT GameState (ExceptT GameError IO)
-
--- TODO: should I use IORef instead of pure state?
-runApp :: App a -> GameState -> IO (Either GameError (a, GameState))
-runApp action state =
-    runExceptT $ runStateT action state
-
-mkEmptyGameStateRef :: IORef GameState
-mkEmptyGameStateRef = undefined
+import           GameMonad
+import           Types
 
 isOver :: GameState -> Bool
-isOver gameState = undefined
+isOver _ = undefined
 
-play :: Player -> Card -> Action -> App ()
-play player card action = do
-    gameState <- get
+play :: Player -> Card -> Action -> AppMonad ()
+play _ _ _ = AppMonad $ do
+    _ <- get
     return ()
 
-join :: App (UUID, PlayerTurn)
-join = do
+join :: AppMonad (Either GameError (UUID, PlayerTurn))
+join = AppMonad $ do
   gameState <- get
-  let playerTurn = nextPlayerTurn (_players gameState)
-  player <- liftIO $ mkPlayer playerTurn emptyHand defaultPegs
-  return (_uuid player, _id player)
+  if (length (_players gameState)) >= 4
+     then return (Left JoinTooManyPlayers)
+     else do
+      let playerTurn = nextPlayerTurn (_players gameState)
+      player <- liftIO $ mkPlayer playerTurn emptyHand defaultPegs
+      modify' (addPlayer player)
+      return (Right (_uuid player, _id player))
+
+  where
+    addPlayer :: Player -> GameState -> GameState
+    addPlayer player s = s { _players = S.insert player (_players s) }
