@@ -6,9 +6,8 @@ import qualified Data.Set                  as S
 import           Data.UUID                 (UUID)
 
 
-import           Data.GameState
 import           GameMonad
-import           Types
+import           Data.Game
 
 isOver :: GameState -> Bool
 isOver _ = undefined
@@ -18,14 +17,13 @@ play _ _ _ = AppMonad $ do
     _ <- get
     return ()
 
-join :: AppMonad (Either GameError (UUID, PlayerTurn))
+join :: AppMonad (Either GameError (UUID, PlayerId))
 join = AppMonad $ do
   gameState <- get
-  if (length (_players gameState)) >= 4
-     then return (Left JoinTooManyPlayers)
-     else do
-      let playerTurn = nextPlayerTurn (_players gameState)
-      player <- liftIO $ mkPlayer playerTurn emptyHand defaultPegs
+  case nextPlayerId (_players gameState) of
+    Nothing -> return $ Left JoinTooManyPlayers
+    Just playerId -> do
+      player <- liftIO $ mkPlayer playerId emptyHand defaultPegs
       modify' (addPlayer player)
       return (Right (_uuid player, _id player))
 

@@ -17,15 +17,16 @@ import           Servant.Server
 
 import           Data.IORef               (IORef, newIORef, readIORef)
 
-import           Data.GameState           (GameState, emptyGameState)
+import           Data.Game
 import           Game                     (join)
 import           GameMonad                (AppMonad, runAppMonad)
 import           Server.Types
-import           Types
+import           Stub
 
 type GameAPI
   = "health" :> Get '[JSON] T.Text
-  :<|> "join" :> Post '[JSON] (Valid GameError (UUID, PlayerTurn))
+  :<|> "join" :> Post '[JSON] (Valid GameError (UUID, PlayerId))
+  :<|> "state" :> Capture "uuid" T.Text :> Get '[JSON] FilteredGameState
 
 gameAPI :: Proxy GameAPI
 gameAPI = Proxy
@@ -35,8 +36,11 @@ gameAPI = Proxy
 healthHandler :: AppMonad Text
 healthHandler = return "OK"
 
-joinHandler :: AppMonad (Valid GameError (UUID, PlayerTurn))
+joinHandler :: AppMonad (Valid GameError (UUID, PlayerId))
 joinHandler = eitherToValid <$> join
+
+stateHandler :: T.Text -> AppMonad FilteredGameState
+stateHandler _ = return filteredGameState
 
 transformAppMonadToHandler :: IORef GameState -> AppMonad a -> Handler a
 transformAppMonadToHandler ref action = do
@@ -62,7 +66,10 @@ transformAppMonadToHandler ref action = do
   --   handler e = return $ Left $ err500 { errBody = pack (show e) }
 
 gameServer :: ServerT GameAPI AppMonad
-gameServer = healthHandler :<|> joinHandler
+gameServer =
+  healthHandler :<|>
+    joinHandler :<|>
+      stateHandler
 
 runServer :: IO ()
 runServer = do
