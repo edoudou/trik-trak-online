@@ -23,30 +23,56 @@ data Mode
   deriving (Eq, Show)
 
 data GameError
-  = InvalidAction Player Action
-  | JoinTooManyPlayers
+  = InvalidAction Action         -- ^ InvalidAction for given Action and Player
+  | JoinTooManyPlayers           -- ^ Too many players are already in the Game
+  | WrongNumberPlayers Int       -- ^ Wrong Number of players
   deriving (Eq, Show)
 
 instance ToJSON GameError where
-  toJSON (InvalidAction p _) = object
+  toJSON (InvalidAction (PA p _)) = object
     [ "type"     .= ("InvalidAction" :: T.Text)
     , "player_id" .= _id p
     ]
   toJSON JoinTooManyPlayers = object
     [ "type" .= ("JoinTooManyPlayers" :: T.Text)]
 
+data GameResult
+  = NewPlayer PlayerUUID PlayerId
+  | Unit
+  deriving (Eq, Show)
+
+instance ToJSON GameResult where
+  toJSON (NewPlayer uuid pid) = object
+    [ "uuid" .= uuid
+    , "pid"  .= pid
+    ]
+  toJSON Unit = toJSON ("OK" :: T.Text)
+
+
+type PlayerUUID = UUID  -- ^ Type synonym for Player UUID
+
 data Action
+  = PA Player PlayerAction
+  | NPA NoPlayerAction
+  deriving (Eq, Show)
+
+data PlayerAction
   = Give Card PlayerId      -- ^ Give Card to PlayerId
   | Move Card Peg Position  -- ^ Move Peg with Card to new Position
-  | SwitchPegs Peg Peg      -- ^ Switch two pegs
-  | Join                    -- ^ Join the Game
+  | Discard Card            -- ^ Discard Card
+  | SwitchPegs PlayerId Peg Peg   -- ^ Switch two pegs inclluding Player Id
+  | QuitGame                -- ^ Quit the game
+  deriving (Eq, Show)
+
+data NoPlayerAction
+  = JoinGame
   deriving (Eq, Show)
 
 data Player = Player
-  { _uuid  :: UUID      -- ^ Player uuid to issue commands
-  , _id    :: PlayerId  -- ^ Player id
-  , _cards :: Hand      -- ^ Hand of cards
-  , _pegs  :: [Peg]     -- ^ Pegs
+  { _uuid  :: PlayerUUID -- ^ Player uuid
+  , _id    :: PlayerId   -- ^ Player id
+  , _cards :: Hand       -- ^ Hand of cards
+  , _pegs  :: [Peg]      -- ^ Pegs
   }
   deriving (Eq, Show)
 
@@ -74,7 +100,8 @@ instance ToJSON PegMode where
     [ "mode" .= T.pack (show mode)
     ]
 
-newtype Position = Position Int
+newtype Position
+  = Position Int  -- ^ Position on the board or the Target
   deriving (Eq, Show)
 
 data Peg
@@ -124,6 +151,11 @@ data PlayerId
   | P4
   deriving (Eq, Show, Ord)
 
+data Team
+  = Team1 PlayerId PlayerId
+  | Team2 PlayerId PlayerId
+  deriving (Eq, Show, Ord)
+
 playerIdToInt :: PlayerId -> Int
 playerIdToInt P1 = 1
 playerIdToInt P2 = 2
@@ -142,9 +174,9 @@ instance ToJSON PlayerId where
 
 instance ToJSONKey PlayerId where
   toJSONKey = ToJSONKeyText f g
-    where f = T.pack . show
-          g = AE.text . T.pack . show
-          -- text function is from Data.Aeson.Encoding
+    where
+      f = T.pack . show . playerIdToInt
+      g = AE.text . T.pack . show . playerIdToInt
 
 cardToInt :: Card -> Int
 cardToInt One    = 1
@@ -203,8 +235,8 @@ emptyGameState = GameState
   }
 
 data Visibility a
-  = Visible a
-  | Hidden a
+  = Visible a      -- ^ Visible Element
+  | Hidden a       -- ^ Hidden Element
   deriving (Eq, Show)
 
 setVisible :: a -> Visibility a
@@ -231,6 +263,6 @@ instance ToJSON FilteredGameState where
     , "cards" .= _fcards s
     ]
 
-
--- handle :: UUID -> Action -> GameMonad
--- handle uuid action = undefined
+-- TODO
+findPlayer :: PlayerUUID -> GameState -> Maybe Player
+findPlayer uuid gameState = undefined
