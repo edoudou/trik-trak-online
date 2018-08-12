@@ -3,11 +3,12 @@
 module Data.Game where
 
 import           Data.Aeson
-import qualified Data.Aeson.Encoding as AE
+import qualified Data.Aeson.Encoding   as AE
 import           Data.Foldable         (maximum)
 import           Data.Function         (on)
 import qualified Data.List             as L
 import qualified Data.Map              as M
+import           Data.Maybe            (fromMaybe, maybe)
 import qualified Data.Set              as S
 import qualified Data.Text             as T
 import           Data.UUID             (UUID)
@@ -15,17 +16,23 @@ import           Data.UUID.V4          (nextRandom)
 import           System.Random.Shuffle (shuffleM)
 
 data Mode
-  = JoinWait      -- ^ Waiting for other players to join
-  | DealCards     -- ^ Dealing cards for all players
-  | CardExchange  -- ^ Exchanging cards between teammates
-  | Play          -- ^ Regular round play
-  | End           -- ^ End of the Game
+  = JoinWait       -- ^ Waiting for other players to join
+  -- | DealCards      -- ^ Dealing cards for all players
+  | CardExchange   -- ^ Exchanging cards between teammates
+  | Winner Team    -- ^ End of the game with a winner team
+  | Play PlayerId  -- ^ Regular round play with PlayerId playing
   deriving (Eq, Show)
+
+instance ToJSON Mode where
+  toJSON (Winner team) = object [ "type" .= ("Winner" :: T.Text), "team" .= team ]
+  toJSON (Play pid) = object [ "type" .= ("Play" :: T.Text), "pid" .= pid]
+  toJSON mode = object [ "type" .= show mode ]
 
 data GameError
   = InvalidAction Action         -- ^ InvalidAction for given Action and Player
   | JoinTooManyPlayers           -- ^ Too many players are already in the Game
   | WrongNumberPlayers Int       -- ^ Wrong Number of players
+  | Unauthorized PlayerUUID      -- ^ Unauthorized UUID accessing the game state
   deriving (Eq, Show)
 
 instance ToJSON GameError where
@@ -35,6 +42,8 @@ instance ToJSON GameError where
     ]
   toJSON JoinTooManyPlayers = object
     [ "type" .= ("JoinTooManyPlayers" :: T.Text)]
+  toJSON (Unauthorized uuid) = object
+    [ "type" .= ("Unauthorized for uuid: " ++ show uuid) ]
 
 data GameResult
   = NewPlayer PlayerUUID PlayerId
@@ -86,9 +95,9 @@ defaultPegs :: [Peg]
 defaultPegs = L.take 4 $ L.repeat PegHome
 
 mkPlayer :: PlayerId -> Hand -> [Peg] -> IO Player
-mkPlayer turn hand pegs = do
+mkPlayer pid hand pegs = do
   uuid <- nextRandom
-  return $ Player uuid turn hand pegs
+  return $ Player uuid pid hand pegs
 
 data PegMode
   = Normal  -- ^ Normal Mode
@@ -109,6 +118,11 @@ data Peg
   | PegTarget Position         -- ^ On the target at position
   | PegHome                    -- ^ Home
   deriving (Eq, Show)
+
+onTarget :: Peg -> Bool
+onTarget (PegBoard _ _) = False
+onTarget PegHome        = False
+onTarget (PegTarget _)  = True
 
 instance ToJSON Peg where
   toJSON PegHome = object
@@ -151,10 +165,11 @@ data PlayerId
   | P4
   deriving (Eq, Show, Ord)
 
-data Team
-  = Team1 PlayerId PlayerId
-  | Team2 PlayerId PlayerId
+data Team = Team PlayerId PlayerId
   deriving (Eq, Show, Ord)
+
+instance ToJSON Team where
+  toJSON (Team pid1 pid2) = toJSON (pid1, pid2)
 
 playerIdToInt :: PlayerId -> Int
 playerIdToInt P1 = 1
@@ -219,10 +234,10 @@ nextPlayerId xs
     inc = (+1)
 
 data GameState = GameState
-  { _turn    :: Maybe UUID        -- ^ Uuid of player who should play next
-  , _players :: S.Set Player      -- ^ Set of players in the game
+  { _players :: S.Set Player      -- ^ Set of players in the game
   , _deck    :: Deck              -- ^ Current deck of card
   , _mode    :: Mode              -- ^ Mode of the Game
+  , _teams   :: (Team, Team)     -- ^ Teams of the game
   }
   deriving (Eq, Show)
 
@@ -231,13 +246,13 @@ emptyGameState = GameState
   { _mode    = JoinWait
   , _players = S.empty
   , _deck    = defaultDeck
-  , _turn    = Nothing
+  , _teams   = (Team P1 P3, Team P2 P4)
   }
 
 data Visibility a
   = Visible a      -- ^ Visible Element
   | Hidden a       -- ^ Hidden Element
-  deriving (Eq, Show)
+  deriving (Eq, Show, Ord)
 
 setVisible :: a -> Visibility a
 setVisible = Visible
@@ -251,18 +266,112 @@ instance ToJSON a => ToJSON (Visibility a) where
 
 data FilteredGameState = FilteredGameState
   { _fmode  :: Mode
-  , _fturn  :: PlayerId
+  , _fteams :: (Team, Team)
   , _fcards :: M.Map PlayerId [Visibility Card]
   , _fpegs  :: M.Map PlayerId [Peg]
   }
 
 instance ToJSON FilteredGameState where
   toJSON s = object
-    [ "turn"  .= toJSON (_fturn s)
-    , "pegs"  .= _fpegs s
+    [ "mode"  .= _fmode s
+    , "teams" .= _fteams s
     , "cards" .= _fcards s
+    , "pegs"  .= _fpegs s
     ]
 
--- TODO
-findPlayer :: PlayerUUID -> GameState -> Maybe Player
-findPlayer uuid gameState = undefined
+findPlayer :: GameState -> PlayerUUID -> Maybe Player
+findPlayer s uuid = L.find ((== uuid) . _uuid) players
+  where
+    players :: [Player]
+    players = S.elems (_players s)
+
+getPlayerUUIDs :: GameState -> S.Set PlayerUUID
+getPlayerUUIDs = S.map _uuid . _players
+
+playerUUIDToPlayerId :: GameState -> PlayerUUID -> Maybe PlayerId
+playerUUIDToPlayerId gameState uuid =
+  M.lookup uuid (playerUUIDMap gameState)
+
+playerIdToPlayerUUID :: GameState -> PlayerId -> Maybe PlayerUUID
+playerIdToPlayerUUID gameState pid =
+  M.lookup pid (playerIdMap gameState)
+
+playerUUIDMap :: GameState -> M.Map PlayerUUID PlayerId
+playerUUIDMap gameState = M.fromList
+      $ S.elems
+      $ S.map (\p -> (_uuid p, _id p))
+      $ _players gameState
+
+playerIdMap :: GameState -> M.Map PlayerId PlayerUUID
+playerIdMap gameState = M.fromList
+      $ S.elems
+      $ S.map (\p -> (_id p, _uuid p))
+      $ _players gameState
+
+filterGameState :: Player -> GameState -> FilteredGameState
+filterGameState player gameState = FilteredGameState
+  { _fmode  = _mode gameState
+  , _fteams = _teams gameState
+  , _fcards = filterCard (_players gameState) player
+  , _fpegs  = allPegs (_players gameState)
+  }
+  where
+    allPegs :: S.Set Player -> M.Map PlayerId [Peg]
+    allPegs players = M.fromList
+      $ map (\q -> (_id q, _pegs q))
+      $ S.elems
+      $ players
+
+    filterCard :: S.Set Player -> Player -> M.Map PlayerId [Visibility Card]
+    filterCard players p = M.fromList
+      $ map (\q -> ((_id q), (map (\c -> if _id p == _id q then setVisible c else setHidden c) (_cards p))))
+      $ S.elems
+      $ players
+
+isOver :: GameState -> Bool
+isOver gameState =
+  maybe False (const True) (winner gameState)
+
+teamWon :: M.Map PlayerId Bool -> Team -> Bool
+teamWon playerIdVictory (Team p1 p2) =
+  fromMaybe False $ do
+    victoryP1 <- M.lookup p1 playerIdVictory
+    victoryP2 <- M.lookup p2 playerIdVictory
+    return $ victoryP1 && victoryP2
+
+winner :: GameState -> Maybe Team
+winner gameState =
+  case ( teamWon playerIdVictory team1
+       , teamWon playerIdVictory team2
+       ) of
+    (True, False) -> return team1
+    (False, True) -> return team2
+    _             -> Nothing
+
+  where
+    (team1, team2) = _teams gameState
+
+    playerIdVictory :: M.Map PlayerId Bool
+    playerIdVictory = M.fromList
+      $ map (\player -> (_id player, playerWon player))
+      $ S.elems
+      $ _players gameState
+
+playerWon :: Player -> Bool
+playerWon = all onTarget . _pegs
+
+dealCards :: Deck -> Maybe (Deck, [Hand])
+dealCards deck =
+  if length deck < 4 * 4
+  then Nothing
+  else Just (deck', [h1, h2, h3, h4])
+
+  where
+    h1, h2, h3, h4 :: Hand
+    h1 = take 4 deck
+    h2 = take 4 (drop 4 deck)
+    h3 = take 4 (drop 8 deck)
+    h4 = take 4 (drop 12 deck)
+
+    deck' :: Deck
+    deck' = drop 16 deck

@@ -1,8 +1,8 @@
 module Stub where
 
-import qualified Data.Map as M
+import qualified Data.Map  as M
 
-import Data.Game
+import           Data.Game
 
 filteredPegs :: M.Map PlayerId [Peg]
 filteredPegs = M.fromList
@@ -22,8 +22,8 @@ filteredCards = M.fromList
 
 filteredGameState :: FilteredGameState
 filteredGameState = FilteredGameState
-  { _fturn = P1
+  { _fteams = (Team P1 P3, Team P2 P4)
   , _fcards = filteredCards
   , _fpegs = filteredPegs
-  , _fmode = JoinWait
+  , _fmode = Play P1
   }

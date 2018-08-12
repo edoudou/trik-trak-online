@@ -2,6 +2,7 @@
 
 module Game where
 
+import           Control.Monad          (when)
 import           Control.Monad.Except   (throwError)
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.State    (get, modify')
@@ -12,8 +13,6 @@ import qualified Data.Set               as S
 import           Data.Game
 import           GameMonad
 
-isOver :: GameState -> Bool
-isOver _ = undefined
 
 play :: Action -> GameMonad ()
 play _  = do
@@ -42,11 +41,32 @@ mkDeck = do
     addDeck :: Deck -> GameState -> GameState
     addDeck deck s = s { _deck = deck }
 
-initGame :: GameMonad GameResult
+initGame :: GameMonad ()
 initGame = do
   checkPlayerNumber
   mkDeck
-  return Unit
+  return ()
+
+deal :: GameMonad ()
+deal = do
+  gameState <- get
+  case dealCards (_deck gameState) of
+    Nothing -> do
+      tell ["Not enough cards in Deck, making a new Deck"]
+      mkDeck
+      deal
+    Just (deck', hands) -> do
+      tell ["Dealing cards from deck"]
+      modify' (\s -> s { _deck = deck'
+                       , _players = giveHand hands (_players gameState)
+                       -- TODO: add something into game state to cycle between players
+                       , _mode = Play P1
+                       })
+  where
+    giveHand :: [Hand] -> S.Set Player -> S.Set Player
+    giveHand hands players =
+      S.fromList [p { _cards = h } | (h, p) <- (zip hands (S.elems players))]
+
 
 join :: GameMonad GameResult
 join = do
@@ -58,10 +78,19 @@ join = do
 
     Just playerId -> do
       player <- liftIO $ mkPlayer playerId emptyHand defaultPegs
-      modify' $ addPlayer player
       tell ["Adding new Player to the Game" ++ show player]
+      modify' $ addPlayer player
+      when (length (_players gameState) == 3) deal
       return $ NewPlayer (_uuid player) (_id player)
 
   where
     addPlayer :: Player -> GameState -> GameState
     addPlayer player s = s { _players = S.insert player (_players s) }
+
+getState :: PlayerUUID -> GameMonad FilteredGameState
+getState uuid = do
+  gameState <- get
+  tell ["[uuid: " ++ show uuid ++ "] Requesting GameState"]
+  case findPlayer gameState uuid of
+    Nothing     -> throwError $ Unauthorized uuid
+    Just player -> return $ filterGameState player gameState

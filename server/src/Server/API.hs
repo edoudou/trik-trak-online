@@ -21,10 +21,10 @@ import           Servant.Server
 
 
 import           Data.Game
-import           Game                     (join)
+import qualified Data.Game                as DG
+import           Game                     (getState, join)
 import           GameMonad                (GameMonad, runGameMonad')
 import           Server.Types             (Valid, invalid)
-import qualified Stub                     as Stub
 
 type GameAPI
   = "health" :> Get '[JSON] T.Text
@@ -45,24 +45,25 @@ joinHandler = join
 stateHandler :: PlayerUUID -> GameMonad FilteredGameState
 stateHandler uuid = do
   tell [show uuid]
-  return Stub.filteredGameState
+  getState uuid
+
+gameErrorToServantError :: GameError -> ServantErr
+gameErrorToServantError gameError@(DG.Unauthorized _)  =
+  err401 { errBody = encode (invalid gameError:: Valid GameError ())}
+gameErrorToServantError gameError =
+  err300 { errBody = encode (invalid gameError :: Valid GameError ()) }
 
 transformGameMonadToHandler :: IORef GameState -> GameMonad a -> Handler a
 transformGameMonadToHandler ref action = do
   gameState <- liftIO $ readIORef ref
-  -- liftIO $ print gameState
-  (result, logs) <- liftIO
-    -- TODO: Add IO error handling here
-    -- $ handle handler
-    $ runGameMonad' action gameState
-  -- Use a proper logger Monad to display log
+  (result, logs) <- liftIO $ runGameMonad' action gameState
+  -- TODO: Use a proper logger Monad to display log
   liftIO $ print logs
   case result of
     Left gameError -> do
+      -- TODO: Use a proper logger Monad to display log
       liftIO (print gameError)
-      throwError $ err300
-        { errBody = encode (invalid gameError :: Valid GameError ())
-        }
+      throwError $ gameErrorToServantError gameError
 
     Right (x, s') -> do
       liftIO $ writeIORef ref s'
