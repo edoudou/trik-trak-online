@@ -116,16 +116,14 @@ class GameEngine extends Component {
 
         this.state = {};
 
-        this.gameState = nextGameState;
         this.nextGameState = nextGameState;
+        this.gameState = JSON.parse(JSON.stringify(nextGameState));
     }
 
     render() {
         return (
             <div>
-                <h1>GameEngine</h1>
-                <div ref="GameWindow">
-                </div>
+                <div ref="GameWindow"/>
             </div>
         );
     }
@@ -136,8 +134,10 @@ class GameEngine extends Component {
 
     componentDidMount(){
         this.app = new PIXI.Application();
-
         this.refs.GameWindow.appendChild(this.app.view);
+
+        console.log(this);
+
         PIXI.loader.load((loader, resources) => {
             let board = new PIXI.Container();
             board.setTransform(400,300);
@@ -171,65 +171,81 @@ class GameEngine extends Component {
                 this.pegsGraphicsArray[i] = {};
                 for(let j in this.gameState.pegs[i]){
                     let peg = new PIXI.Container();
-
                     let graphics = new PIXI.Graphics();
+                    let stakeGraphics = new PIXI.Graphics();
 
                     const color =   (i === '1')?  0x00FF00:
                                     (i === '2')?  0xFF0000:
                                     (i === '3')?  0x0000FF:
                                                 0xFFFF00;
-                    console.log(i,color);
+
                     graphics.beginFill(color);
                     graphics.lineStyle(1, 0x000000);
-
                     graphics.drawRect(-260,-260,20,20);
 
+                    stakeGraphics.beginFill(0x111111);
+                    stakeGraphics.lineStyle(0, 0x000000);
+                    stakeGraphics.drawRect(-252,-252,4,4);
+
                     peg.addChild(graphics);
+                    peg.addChild(stakeGraphics);
 
-                    this.pegsGraphicsArray[i][j] = peg;
+                    this.pegsGraphicsArray[i][j] = {
+                        graphics : peg,
+                        stake :
+                            {
+                                graphics : stakeGraphics
+                            }
+                    };
 
-                    board.addChild(this.pegsGraphicsArray[i][j]);
+                    board.addChild(this.pegsGraphicsArray[i][j].graphics);
                 }
             }
 
-            console.log(this.pegsGraphicsArray);
+            this.update(true);
+
             this.app.stage.addChild(board);
             this.app.ticker.add(() => {
-                this.gameState = this.nextGameState;
-
-                for(let i in this.gameState.pegs){
-                    for(let j in this.gameState.pegs[i]){
-                        if(this.gameState.pegs[i][j].location === "Board" && this.gameState.pegs[i][j].pos) {
-                            const x = config.boardGraphicsSpecs[this.gameState.pegs[i][j].pos].x,
-                                  y = config.boardGraphicsSpecs[this.gameState.pegs[i][j].pos].y;
-                            console.log(x,y);
-                            this.pegsGraphicsArray[i][j].setTransform(y*40+10,x*40+10);
-                        }
-                        else if(this.gameState.pegs[i][j].location === "Target" && this.gameState.pegs[i][j].pos){
-                            const x = config.targetGraphicsSpecs[this.gameState.pegs[i][j].pos].x,
-                                y = config.targetGraphicsSpecs[this.gameState.pegs[i][j].pos].y;
-                            this.pegsGraphicsArray[i][j].setTransform(y*40+10,x*40+10);
-                        }
-                        else
-                        {
-                            const x = j * 0.2 + (
-                                                (i === "1")? 11:
-                                                (i === "2")? 3 :
-                                                (i === "3")? 0 :
-                                                7),
-                                  y = j * 0.2 + (
-                                                (i === "1")? 3:
-                                                (i === "2")? 0 :
-                                                (i === "3")? 7 :
-                                                11);
-                            console.log(x,y);
-                            this.pegsGraphicsArray[i][j].setTransform(y*40+10,x*40+10);
-                        }
-                    }
-                }
-
+                this.update();
+                this.gameState = JSON.parse(JSON.stringify(this.nextGameState));
             });
         });
+    }
+
+    update = (force = false) => {
+        for(let i in this.gameState.pegs){
+            for(let j in this.gameState.pegs[i]){
+                if(force || JSON.stringify(this.gameState.pegs[i][j]) !== JSON.stringify(this.nextGameState.pegs[i][j])) {
+                    this.gameState.pegs[i][j] = this.nextGameState.pegs[i][j];
+                    if (this.gameState.pegs[i][j].location === "Board") {
+                        this.pegsGraphicsArray[i][j].stake.graphics.alpha = 1 * this.gameState.pegs[i][j].stake;
+                        const x = config.boardGraphicsSpecs[this.gameState.pegs[i][j].pos].x,
+                            y = config.boardGraphicsSpecs[this.gameState.pegs[i][j].pos].y;
+                        console.log(x, y);
+                        this.pegsGraphicsArray[i][j].graphics.setTransform(y * 40 + 10, x * 40 + 10);
+                    }
+                    else if (this.gameState.pegs[i][j].location === "Target") {
+                        this.pegsGraphicsArray[i][j].stake.graphics.alpha = 1;
+                        const x = config.targetGraphicsSpecs[this.gameState.pegs[i][j].pos].x,
+                            y = config.targetGraphicsSpecs[this.gameState.pegs[i][j].pos].y;
+                        this.pegsGraphicsArray[i][j].graphics.setTransform(y * 40 + 10, x * 40 + 10);
+                    }
+                    else {
+                        const x = j * 0.2 + (
+                                (i === "1") ? 11 :
+                                    (i === "2") ? 3 :
+                                        (i === "3") ? 0 :
+                                            7),
+                            y = j * 0.2 + (
+                                (i === "1") ? 3 :
+                                    (i === "2") ? 0 :
+                                        (i === "3") ? 7 :
+                                            11);
+                        this.pegsGraphicsArray[i][j].graphics.setTransform(y * 40 + 10, x * 40 + 10);
+                    }
+                }
+            }
+        }
     }
 }
 
