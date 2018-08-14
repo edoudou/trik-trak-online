@@ -6,7 +6,7 @@ import           Data.Game
 
 filteredPegs :: M.Map PlayerId [Peg]
 filteredPegs = M.fromList
-  [ (P1, [PegHome, PegHome, PegTarget (Position 1), PegBoard (Position 1) Stake])
+  [ (P1, [PegHome, PegHome, PegTarget (TargetPosition 1), PegBoard (BoardPosition 1) Stake])
   , (P2, [PegHome, PegHome, PegHome, PegHome])
   , (P3, [PegHome, PegHome, PegHome, PegHome])
   , (P4, [PegHome, PegHome, PegHome, PegHome])

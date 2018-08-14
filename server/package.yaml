@@ -24,9 +24,11 @@ dependencies:
 - base >= 4.7 && < 5
 - bytestring
 - containers
+- MonadRandom
 - mtl
 - random
 - random-shuffle
+- scientific
 - servant
 - servant-client
 - servant-server

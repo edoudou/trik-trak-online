@@ -1,7 +1,9 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Data.Game where
 
+import           Control.Monad.Random  (StdGen, MonadRandom, getRandom)
 import           Data.Aeson
 import qualified Data.Aeson.Encoding   as AE
 import           Data.Foldable         (maximum)
@@ -9,10 +11,10 @@ import           Data.Function         (on)
 import qualified Data.List             as L
 import qualified Data.Map              as M
 import           Data.Maybe            (fromMaybe, maybe)
+import           Data.Scientific       (toBoundedInteger)
 import qualified Data.Set              as S
 import qualified Data.Text             as T
 import           Data.UUID             (UUID)
-import           Data.UUID.V4          (nextRandom)
 import           System.Random.Shuffle (shuffleM)
 
 data Mode
@@ -28,11 +30,24 @@ instance ToJSON Mode where
   toJSON (Play pid) = object [ "type" .= ("Play" :: T.Text), "pid" .= pid]
   toJSON mode = object [ "type" .= show mode ]
 
+-- TODO: use a better type. (LogLevel, Text) for instance
+type GameLog = [String]
+
+data GameEnvironment = GameEnvironment
+  { teams :: (Team, Team)  -- ^ Player Teams
+  , gen   :: StdGen        -- ^ StdGen used to run the game
+  }
+  deriving (Show)
+
+defaultGameEnvironment :: StdGen -> GameEnvironment
+defaultGameEnvironment = GameEnvironment (Team P1 P3, Team P2 P4)
+
 data GameError
   = InvalidAction Action         -- ^ InvalidAction for given Action and Player
   | JoinTooManyPlayers           -- ^ Too many players are already in the Game
   | WrongNumberPlayers Int       -- ^ Wrong Number of players
-  | Unauthorized PlayerUUID      -- ^ Unauthorized UUID accessing the game state
+  | Unauthorized PlayerUUID      -- ^ Unauthorized UUID
+  | WrongPlayerTurn PlayerUUID   -- ^ Wrong player turn
   deriving (Eq, Show)
 
 instance ToJSON GameError where
@@ -44,6 +59,8 @@ instance ToJSON GameError where
     [ "type" .= ("JoinTooManyPlayers" :: T.Text)]
   toJSON (Unauthorized uuid) = object
     [ "type" .= ("Unauthorized for uuid: " ++ show uuid) ]
+  toJSON (WrongPlayerTurn uuid) = object
+    [ "type" .= ("WrongPlayerTurn for uuid: " ++ show uuid) ]
 
 data GameResult
   = NewPlayer PlayerUUID PlayerId
@@ -56,7 +73,6 @@ instance ToJSON GameResult where
     , "pid"  .= pid
     ]
   toJSON Unit = toJSON ("OK" :: T.Text)
-
 
 type PlayerUUID = UUID  -- ^ Type synonym for Player UUID
 
@@ -73,8 +89,37 @@ data PlayerAction
   | QuitGame                -- ^ Quit the game
   deriving (Eq, Show)
 
+instance ToJSON PlayerAction where
+  toJSON (Give c pid) = object
+    [ "type" .= ("Give" :: T.Text)
+    , "card" .= c
+    , "pid"  .= pid
+    ]
+  toJSON (Move c peg pos) = object
+    [ "type"      .= ("Move" :: T.Text)
+    , "card"      .= c
+    , "peg"       .= peg
+    , "position"  .= pos
+    ]
+
+instance FromJSON PlayerAction where
+  parseJSON = withObject "PlayerAction" $ \o -> do
+    actionType :: String <- (o .: "type")
+    case actionType of
+      "Give"       -> parseGiveAction o
+      "Move"       -> parseMove o
+      "Discard"    -> parseDiscard o
+      "SwitchPegs" -> parseSwitchPegs o
+      "QuitGame"   -> return QuitGame
+
+    where
+      parseGiveAction o = Give <$> o .: "card" <*> o .: "pid"
+      parseDiscard    o = Discard <$> o .: "card"
+      parseSwitchPegs o = SwitchPegs <$> o .: "pid" <*> o .: "from" <*> o .: "to"
+      parseMove       o = Move <$> o .: "card" <*> o .: "peg" <*> o .: "position"
+
 data NoPlayerAction
-  = JoinGame
+  = JoinGame      -- ^ Join the Game
   deriving (Eq, Show)
 
 data Player = Player
@@ -94,9 +139,9 @@ emptyHand = []
 defaultPegs :: [Peg]
 defaultPegs = L.take 4 $ L.repeat PegHome
 
-mkPlayer :: PlayerId -> Hand -> [Peg] -> IO Player
+mkPlayer :: MonadRandom m => PlayerId -> Hand -> [Peg] -> m Player
 mkPlayer pid hand pegs = do
-  uuid <- nextRandom
+  uuid <- getRandom
   return $ Player uuid pid hand pegs
 
 data PegMode
@@ -109,34 +154,120 @@ instance ToJSON PegMode where
     [ "mode" .= T.pack (show mode)
     ]
 
-newtype Position
-  = Position Int  -- ^ Position on the board or the Target
+instance FromJSON PegMode where
+  parseJSON = withObject "PegMode" $ \o -> do
+    modeType :: String <- o .: "mode"
+    case modeType of
+      "Normal" -> return Normal
+      "Stake"  -> return Stake
+      _        -> fail "Error parsing PegMode"
+
+data Position
+  = BP BoardPosition
+  | TP TargetPosition
   deriving (Eq, Show)
 
-data Peg
-  = PegBoard Position PegMode  -- ^ On the board at position with mode
-  | PegTarget Position         -- ^ On the target at position
-  | PegHome                    -- ^ Home
+instance FromJSON Position where
+  parseJSON = withObject "Position" $ \o -> do
+    positionType :: String <- o .: "type"
+    position <- o .: "position"
+    case positionType of
+      "Board" ->
+        case boardPosition position of
+          Nothing -> fail "Error Parsing BoardPosition"
+          Just bp -> return (BP bp)
+      "Target" ->
+        case targetPosition position of
+          Nothing -> fail "Error Parsing TargetPosition"
+          Just tp -> return (TP tp)
+
+instance ToJSON Position where
+  toJSON (BP bp) = object
+    [ "type" .= ("Board" :: T.Text)
+    , "position" .= bp
+    ]
+  toJSON (TP tp) = object
+    [ "type" .= ("Target" :: T.Text)
+    , "position" .= tp
+    ]
+
+newtype BoardPosition
+  = BoardPosition Int  -- ^ Position on the Board
   deriving (Eq, Show)
+
+instance FromJSON BoardPosition where
+  parseJSON = withScientific "BoardPosition" $ \n ->
+    maybe (fail "Error Parsing BoardPosition") return $ do
+      i <- toBoundedInteger n
+      c <- boardPosition i
+      return c
+
+instance ToJSON BoardPosition where
+  toJSON (BoardPosition x) = toJSON x
+
+newtype TargetPosition
+  = TargetPosition Int  -- ^ Position on the Target
+  deriving (Eq, Show)
+
+instance ToJSON TargetPosition where
+  toJSON (TargetPosition x) = toJSON x
+
+instance FromJSON TargetPosition where
+  parseJSON = withScientific "TargetPosition" $ \n ->
+    maybe (fail "Error Parsing TargetPosition") return $ do
+      i <- toBoundedInteger n
+      c <- targetPosition i
+      return c
+
+boardPosition :: Int -> Maybe BoardPosition
+boardPosition n
+  | n >= 16 * 4 = Nothing
+  | n < 0 = Nothing
+  | otherwise = Just $ BoardPosition n
+
+targetPosition :: Int -> Maybe TargetPosition
+targetPosition n
+  | n >= 4 = Nothing
+  | n < 0 = Nothing
+  | otherwise = Just $ TargetPosition n
+
+data Peg
+  = PegBoard BoardPosition PegMode   -- ^ On the board at position with mode
+  | PegTarget TargetPosition         -- ^ On the target at position
+  | PegHome                          -- ^ Home
+  deriving (Eq, Show)
+
+instance FromJSON Peg where
+  parseJSON = withObject "Peg" $ \o -> do
+    location :: String <- o .: "location"
+    case location of
+      "Home"   -> return PegHome
+      "Target" -> parsePegTarget o
+      "Board"  -> parsePegBoard o
+      _        -> fail "Error parsing Peg"
+    where
+      parsePegTarget o = PegTarget <$> o .: "position"
+      parsePegBoard o = PegBoard <$> o .: "position" <*> o .: "mode"
+
+instance ToJSON Peg where
+  toJSON PegHome = object
+    [ "location" .= (T.pack "Home")
+    ]
+  toJSON (PegTarget (TargetPosition x)) = object
+    [ "location" .= (T.pack "Target")
+    , "position" .= x
+    ]
+  toJSON (PegBoard (BoardPosition x) mode) = object
+    [ "location" .= (T.pack "Board")
+    , "position" .= x
+    , "stake" .= (mode == Stake :: Bool)
+    ]
 
 onTarget :: Peg -> Bool
 onTarget (PegBoard _ _) = False
 onTarget PegHome        = False
 onTarget (PegTarget _)  = True
 
-instance ToJSON Peg where
-  toJSON PegHome = object
-    [ "location" .= (T.pack "Home")
-    ]
-  toJSON (PegTarget (Position x)) = object
-    [ "location" .= (T.pack "Target")
-    , "position" .= x
-    ]
-  toJSON (PegBoard (Position x) mode) = object
-    [ "location" .= (T.pack "Board")
-    , "position" .= x
-    , "stake" .= (mode == Stake :: Bool)
-    ]
 
 data Card
   = One
@@ -156,6 +287,13 @@ data Card
 instance ToJSON Card where
   toJSON = toJSON . cardToInt
 
+instance FromJSON Card where
+  parseJSON = withScientific "Card" $ \n ->
+    maybe (fail "Error") return $ do
+      i <- toBoundedInteger n
+      c <- intToCard i
+      return c
+
 type Deck       = [Card]
 type Hand       = [Card]
 data PlayerId
@@ -164,6 +302,13 @@ data PlayerId
   | P3
   | P4
   deriving (Eq, Show, Ord)
+
+instance FromJSON PlayerId where
+  parseJSON = withScientific "PlayerId" $ \n ->
+    maybe (fail "Error") return $ do
+      i   <- toBoundedInteger n
+      pid <- intToPlayerId i
+      return pid
 
 data Team = Team PlayerId PlayerId
   deriving (Eq, Show, Ord)
@@ -192,6 +337,21 @@ instance ToJSONKey PlayerId where
     where
       f = T.pack . show . playerIdToInt
       g = AE.text . T.pack . show . playerIdToInt
+
+intToCard :: Int -> Maybe Card
+intToCard 1  = Just One
+intToCard 2  = Just Two
+intToCard 3  = Just Three
+intToCard 4  = Just Four
+intToCard 5  = Just Five
+intToCard 6  = Just Six
+intToCard 7  = Just Seven
+intToCard 8  = Just Eight
+intToCard 9  = Just Nine
+intToCard 10 = Just Ten
+intToCard 11 = Just Switch
+intToCard 12 = Just Twelve
+intToCard _  = Nothing
 
 cardToInt :: Card -> Int
 cardToInt One    = 1

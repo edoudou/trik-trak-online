@@ -4,10 +4,10 @@ module Game where
 
 import           Control.Monad          (when)
 import           Control.Monad.Except   (throwError)
-import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.State    (get, modify')
 import           Control.Monad.Writer   (tell)
 import qualified Data.Set               as S
+import           System.Random.Shuffle  (shuffleM)
 
 
 import           Data.Game
@@ -33,7 +33,7 @@ checkPlayerNumber = do
 
 mkDeck :: GameMonad Deck
 mkDeck = do
-  deck <- liftIO $ shuffleDeck defaultDeck
+  deck <- shuffleM defaultDeck
   modify' $ addDeck deck
   return deck
 
@@ -55,6 +55,7 @@ deal = do
       tell ["Not enough cards in Deck, making a new Deck"]
       mkDeck
       deal
+
     Just (deck', hands) -> do
       tell ["Dealing cards from deck"]
       modify' (\s -> s { _deck = deck'
@@ -62,6 +63,7 @@ deal = do
                        -- TODO: add something into game state to cycle between players
                        , _mode = Play P1
                        })
+
   where
     giveHand :: [Hand] -> S.Set Player -> S.Set Player
     giveHand hands players =
@@ -77,8 +79,8 @@ join = do
       throwError JoinTooManyPlayers
 
     Just playerId -> do
-      player <- liftIO $ mkPlayer playerId emptyHand defaultPegs
-      tell ["Adding new Player to the Game" ++ show player]
+      player <- mkPlayer playerId emptyHand defaultPegs
+      tell ["Adding new Player to the Game: " ++ show player]
       modify' $ addPlayer player
       when (length (_players gameState) == 3) deal
       return $ NewPlayer (_uuid player) (_id player)

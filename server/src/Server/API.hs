@@ -18,18 +18,27 @@ import           Data.Text                as T
 import           Network.Wai.Handler.Warp (run)
 import           Servant.API
 import           Servant.Server
+import System.Random (getStdGen)
 
 
 import           Data.Game
 import qualified Data.Game                as DG
 import           Game                     (getState, join)
-import           GameMonad                (GameMonad, runGameMonad')
+import           GameMonad                (GameMonad, runGameMonad)
 import           Server.Types             (Valid, invalid)
 
 type GameAPI
-  = "health" :> Get '[JSON] T.Text
-  :<|> "join" :> Post '[JSON] GameResult
-  :<|> "state" :> Capture "uuid" PlayerUUID :> Post '[JSON] FilteredGameState
+  =    "health"                           -- ^ API Health
+       :> Get '[JSON] T.Text
+  :<|> "join"                             -- ^ Joining a game
+       :> Post '[JSON] GameResult
+  :<|> "state"                            -- ^ Getting game state for player
+       :> Capture "uuid" PlayerUUID
+       :> Post '[JSON] FilteredGameState
+  :<|> "play"                             -- ^ Playing a Move
+       :> Capture "uuid" PlayerUUID
+       :> ReqBody '[JSON] PlayerAction
+       :> Post '[JSON] GameResult
 
 gameAPI :: Proxy GameAPI
 gameAPI = Proxy
@@ -43,9 +52,10 @@ joinHandler :: GameMonad GameResult
 joinHandler = join
 
 stateHandler :: PlayerUUID -> GameMonad FilteredGameState
-stateHandler uuid = do
-  tell [show uuid]
-  getState uuid
+stateHandler uuid = tell [show uuid] >> getState uuid
+
+playHandler :: PlayerUUID -> PlayerAction -> GameMonad GameResult
+playHandler uuid playerAction = return Unit
 
 gameErrorToServantError :: GameError -> ServantErr
 gameErrorToServantError gameError@(DG.Unauthorized _)  =
@@ -53,32 +63,37 @@ gameErrorToServantError gameError@(DG.Unauthorized _)  =
 gameErrorToServantError gameError =
   err300 { errBody = encode (invalid gameError :: Valid GameError ()) }
 
-transformGameMonadToHandler :: IORef GameState -> GameMonad a -> Handler a
-transformGameMonadToHandler ref action = do
+-- Natural Transformation: GameMonad ~> Handler
+-- TODO: use STM instead of IORef!
+transformGameMonadToHandler :: GameEnvironment -> IORef GameState -> GameMonad a -> Handler a
+transformGameMonadToHandler gameEnv ref action = do
+
+  -- TODO: use STM!
   gameState <- liftIO $ readIORef ref
-  (result, logs) <- liftIO $ runGameMonad' action gameState
+
+  -- Running Pure computation for the Game
+  let (result, logs) = runGameMonad gameEnv gameState action
+
   -- TODO: Use a proper logger Monad to display log
   liftIO $ print logs
+
   case result of
     Left gameError -> do
       -- TODO: Use a proper logger Monad to display log
-      liftIO (print gameError)
+      liftIO $ print gameError
       throwError $ gameErrorToServantError gameError
 
     Right (x, s') -> do
+      -- TODO: use STM and TVar instead! to avoid write loss
       liftIO $ writeIORef ref s'
       return x
-
-  -- TODO: add error handling
-  -- where
-  --   handler :: SomeException -> IO (Either ServantErr a)
-  --   handler e = return $ Left $ err500 { errBody = encode (show e) }
 
 gameServer :: ServerT GameAPI GameMonad
 gameServer =
   healthHandler :<|>
-    joinHandler :<|>
-      stateHandler
+  joinHandler   :<|>
+  stateHandler  :<|>
+  playHandler
 
 runServer :: IO ()
 runServer = do
@@ -87,8 +102,10 @@ runServer = do
   -- to avoid concurrency issues or rely on redis
   -- that handles transactions
   ref <- newIORef emptyGameState
+  gen <- getStdGen
+  let gameEnv = defaultGameEnvironment gen
 
   -- TODO: use config for port and Debug Mode for instance
   run 8092
     $ serve gameAPI
-    $ hoistServer gameAPI (transformGameMonadToHandler ref) gameServer
+    $ hoistServer gameAPI (transformGameMonadToHandler gameEnv ref) gameServer
