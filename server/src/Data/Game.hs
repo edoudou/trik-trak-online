@@ -10,7 +10,7 @@ import           Data.Foldable         (maximum)
 import           Data.Function         (on)
 import qualified Data.List             as L
 import qualified Data.Map              as M
-import           Data.Maybe            (fromMaybe, maybe)
+import           Data.Maybe            (isJust, fromMaybe, maybe)
 import           Data.Scientific       (toBoundedInteger)
 import qualified Data.Set              as S
 import qualified Data.Text             as T
@@ -33,7 +33,7 @@ instance ToJSON Mode where
 -- TODO: use a better type. (LogLevel, Text) for instance
 type GameLog = [String]
 
-data GameEnvironment = GameEnvironment
+newtype GameEnvironment = GameEnvironment
   { teams :: (Team, Team)  -- ^ Player Teams
   }
   deriving (Show)
@@ -103,7 +103,7 @@ instance ToJSON PlayerAction where
 
 instance FromJSON PlayerAction where
   parseJSON = withObject "PlayerAction" $ \o -> do
-    actionType :: String <- (o .: "type")
+    actionType :: String <- o .: "type"
     case actionType of
       "Give"       -> parseGiveAction o
       "Move"       -> parseMove o
@@ -136,7 +136,7 @@ emptyHand :: Hand
 emptyHand = []
 
 defaultPegs :: [Peg]
-defaultPegs = L.take 4 $ L.repeat PegHome
+defaultPegs = L.replicate 4 PegHome
 
 mkPlayer :: MonadRandom m => PlayerId -> Hand -> [Peg] -> m Player
 mkPlayer pid hand pegs = do
@@ -198,8 +198,7 @@ instance FromJSON BoardPosition where
   parseJSON = withScientific "BoardPosition" $ \n ->
     maybe (fail "Error Parsing BoardPosition") return $ do
       i <- toBoundedInteger n
-      c <- boardPosition i
-      return c
+      boardPosition i
 
 instance ToJSON BoardPosition where
   toJSON (BoardPosition x) = toJSON x
@@ -215,8 +214,7 @@ instance FromJSON TargetPosition where
   parseJSON = withScientific "TargetPosition" $ \n ->
     maybe (fail "Error Parsing TargetPosition") return $ do
       i <- toBoundedInteger n
-      c <- targetPosition i
-      return c
+      targetPosition i
 
 boardPosition :: Int -> Maybe BoardPosition
 boardPosition n
@@ -250,14 +248,14 @@ instance FromJSON Peg where
 
 instance ToJSON Peg where
   toJSON PegHome = object
-    [ "location" .= (T.pack "Home")
+    [ "location" .= T.pack "Home"
     ]
   toJSON (PegTarget (TargetPosition x)) = object
-    [ "location" .= (T.pack "Target")
+    [ "location" .= T.pack "Target"
     , "position" .= x
     ]
   toJSON (PegBoard (BoardPosition x) mode) = object
-    [ "location" .= (T.pack "Board")
+    [ "location" .= T.pack "Board"
     , "position" .= x
     , "stake" .= (mode == Stake :: Bool)
     ]
@@ -290,8 +288,7 @@ instance FromJSON Card where
   parseJSON = withScientific "Card" $ \n ->
     maybe (fail "Error") return $ do
       i <- toBoundedInteger n
-      c <- intToCard i
-      return c
+      intToCard i
 
 type Deck       = [Card]
 type Hand       = [Card]
@@ -306,8 +303,7 @@ instance FromJSON PlayerId where
   parseJSON = withScientific "PlayerId" $ \n ->
     maybe (fail "Error") return $ do
       i   <- toBoundedInteger n
-      pid <- intToPlayerId i
-      return pid
+      intToPlayerId i
 
 data Team = Team PlayerId PlayerId
   deriving (Eq, Show, Ord)
@@ -369,7 +365,7 @@ cardToInt Twelve = 12
 defaultDeck :: Deck
 defaultDeck =
     L.concat
-    [ take 4 (L.repeat c) | c <-
+    [ L.replicate 4 c | c <-
         [ One, Two, Three, Four
         , Five, Six, Seven, Eight
         , Nine, Ten, Switch, Twelve
@@ -397,6 +393,7 @@ nextPlayerId xs
 
 data GameState = GameState
   { _players :: S.Set Player      -- ^ Set of players in the game
+  , _roundPlayerTurn :: PlayerId -- ^ Round Player Turn
   , _deck    :: Deck              -- ^ Current deck of card
   , _mode    :: Mode              -- ^ Mode of the Game
   , _teams   :: (Team, Team)      -- ^ Teams of the game
@@ -409,6 +406,7 @@ emptyGameState :: StdGen -> GameState
 emptyGameState g = GameState
   { _mode         = JoinWait
   , _players      = S.empty
+  , _roundPlayerTurn = P1
   , _deck         = emptyDeck
   , _teams        = (Team P1 P3, Team P2 P4)
   , _cardExchange = M.empty
@@ -485,18 +483,16 @@ filterGameState player gameState = FilteredGameState
     allPegs :: S.Set Player -> M.Map PlayerId [Peg]
     allPegs players = M.fromList
       $ map (\q -> (_id q, _pegs q))
-      $ S.elems
-      $ players
+      $ S.elems players
 
     filterCard :: S.Set Player -> Player -> M.Map PlayerId [Visibility Card]
     filterCard players p = M.fromList
-      $ map (\q -> ((_id q), (map (\c -> if _id p == _id q then setVisible c else setHidden c) (_cards p))))
-      $ S.elems
-      $ players
+      $ map (\q -> (_id q, map (\c -> if _id p == _id q then setVisible c else setHidden c) (_cards p)))
+      $ S.elems players
+      -- TODO: use lens to simplify
 
 isOver :: GameState -> Bool
-isOver gameState =
-  maybe False (const True) (winner gameState)
+isOver gameState = isJust $ winner gameState
 
 teamWon :: M.Map PlayerId Bool -> Team -> Bool
 teamWon playerIdVictory (Team p1 p2) =

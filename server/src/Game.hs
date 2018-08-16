@@ -1,4 +1,3 @@
-{-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Game where
@@ -45,7 +44,7 @@ giveCard player card = do
       let cardExchange' = M.insert (_id player) card (_cardExchange gameState)
           hand' = L.delete card (_cards player)
           players' = S.map (\p ->
-            if (_id p) == (_id player)
+            if _id p == _id player
             then p { _cards = hand' }
             else p) (_players gameState)
       in
@@ -64,7 +63,11 @@ printGameState gameState = do
   -- Game Mode
   putStrLn $ "Mode: " ++ show (_mode gameState)
 
+  -- Deck
+  putStrLn $ "Deck: " ++ show (_deck gameState)
+
   -- Player Information
+  putStrLn ""
   for_ players $ \p -> do
     putStrLn $ "PlayerId: " ++ show (_id p)
     putStrLn $ "  PlayerUUID: " ++ show (_uuid p)
@@ -80,9 +83,7 @@ checkPlayerNumber :: GameMonad ()
 checkPlayerNumber = do
   gameState <- get
   let nPlayers = length (_players gameState)
-  if nPlayers /= 4
-  then throwError $ WrongNumberPlayers nPlayers
-  else return ()
+  when (nPlayers /=4) $ throwError $ WrongNumberPlayers nPlayers
 
 mkDeck :: GameMonad Deck
 mkDeck = do
@@ -98,6 +99,7 @@ initGame :: GameMonad ()
 initGame = do
   checkPlayerNumber
   mkDeck
+  deal
   return ()
 
 deal :: GameMonad ()
@@ -113,19 +115,20 @@ deal = do
       tell ["Dealing cards from deck"]
       modify' (\s -> s { _deck = deck'
                        , _players = giveHand hands (_players gameState)
-                       -- TODO: add something into game state to cycle between players
-                       , _mode = Play P1
+                       , _mode = CardExchange
                        })
 
   where
     giveHand :: [Hand] -> S.Set Player -> S.Set Player
     giveHand hands players =
-      S.fromList [p { _cards = h } | (h, p) <- (zip hands (S.elems players))]
+      S.fromList [p { _cards = h } | (h, p) <- zip hands (S.elems players)]
 
 
 join :: GameMonad GameResult
 join = do
+
   gameState <- get
+
   case nextPlayerId (_players gameState) of
     Nothing       -> do
       tell ["Cannot add a new player, the party is full"]
@@ -135,9 +138,7 @@ join = do
       player <- mkPlayer playerId emptyHand defaultPegs
       tell ["Adding new Player to the Game: " ++ show player]
       modify' $ addPlayer player
-      when (length (_players gameState) == 3) $ do
-        mkDeck  -- Making initial deck
-        deal    -- Dealing cards
+      when (length (_players gameState) == 3) initGame
       return $ NewPlayer (_uuid player) (_id player)
 
   where
