@@ -7,8 +7,8 @@ import           Control.Monad.Except  (throwError)
 import           Control.Monad.State   (get, modify')
 import           Control.Monad.Writer  (tell)
 import           Data.Foldable         (for_)
-import Data.List as L
-import qualified Data.Map as M
+import           Data.List             as L
+import qualified Data.Map              as M
 import qualified Data.Set              as S
 import           System.Random.Shuffle (shuffleM)
 
@@ -25,10 +25,10 @@ play _  = do
 handle :: Action -> GameMonad GameResult
 handle (NPA JoinGame)                   = join
 handle (PA p (Exchange c))              = giveCard p c
-handle (PA p (Move c peg position))     = undefined
-handle (PA p (Discard c))               = undefined
-handle (PA p (SwitchPegs to peg1 peg2)) = undefined
-handle (PA p QuitGame)                  = undefined
+-- handle (PA p (Move c peg position))     = undefined
+-- handle (PA p (Discard c))               = undefined
+-- handle (PA p (SwitchPegs to peg1 peg2)) = undefined
+-- handle (PA p QuitGame)                  = undefined
 handle _                                = undefined
 
 giveCard :: Player -> Card -> GameMonad GameResult
@@ -79,11 +79,18 @@ printGameState gameState = do
     players :: [Player]
     players = S.elems $ _players gameState
 
-checkPlayerNumber :: GameMonad ()
-checkPlayerNumber = do
+checkPlayerNumber :: Int -> GameMonad ()
+checkPlayerNumber n = do
   gameState <- get
   let nPlayers = length (_players gameState)
-  when (nPlayers /=4) $ throwError $ WrongNumberPlayers nPlayers
+  when (nPlayers /= n) $ throwError $ WrongNumberPlayers nPlayers
+
+checkPlayerTurn :: Player -> GameMonad Bool
+checkPlayerTurn player = do
+  gameState <- get
+  case _mode gameState of
+    Play pid -> return (pid == _id player)
+    _        -> return False
 
 mkDeck :: GameMonad Deck
 mkDeck = do
@@ -97,7 +104,7 @@ mkDeck = do
 
 initGame :: GameMonad ()
 initGame = do
-  checkPlayerNumber
+  checkPlayerNumber 4
   mkDeck
   deal
   return ()

@@ -8,6 +8,7 @@ module Server.API where
 
 import           Control.Monad.Except     (throwError)
 import           Control.Monad.IO.Class   (liftIO)
+import           Control.Monad.State      (get)
 import           Control.Monad.Writer     (tell)
 import           Data.Aeson               (encode)
 import           Data.Proxy               (Proxy (..))
@@ -22,7 +23,8 @@ import           System.Random            (getStdGen)
 
 import           Data.Game
 import qualified Data.Game                as DG
-import           Game                     (getState, join, printGameState)
+import           Game                     (checkPlayerTurn, getState, handle,
+                                           join, printGameState)
 import           GameMonad                (GameMonad, runGameMonad)
 import           Server.Types             (Valid, invalid)
 
@@ -54,7 +56,16 @@ stateHandler :: PlayerUUID -> GameMonad FilteredGameState
 stateHandler uuid = tell [show uuid] >> getState uuid
 
 playHandler :: PlayerUUID -> PlayerAction -> GameMonad GameResult
-playHandler uuid playerAction = return Unit
+playHandler uuid playerAction = do
+  gameState <- get
+  case findPlayer gameState uuid of
+    Nothing ->
+      throwError $ PlayerNotFound uuid
+    Just player -> do
+      b <- checkPlayerTurn player
+      if b
+      then handle $ PA player playerAction
+      else throwError $ WrongPlayerTurn uuid
 
 gameErrorToServantError :: GameError -> ServantErr
 gameErrorToServantError gameError@(DG.Unauthorized _)  =

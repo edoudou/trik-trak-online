@@ -48,6 +48,7 @@ data GameError
   | Unauthorized PlayerUUID      -- ^ Unauthorized UUID
   | WrongPlayerTurn PlayerUUID   -- ^ Wrong player turn
   | CardNotAvailabe PlayerUUID Card  -- ^ Card is not availabe for player
+  | PlayerNotFound PlayerUUID    -- ^ Player Not Found exception
   deriving (Eq, Show)
 
 instance ToJSON GameError where
