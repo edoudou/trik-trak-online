@@ -35,11 +35,10 @@ type GameLog = [String]
 
 data GameEnvironment = GameEnvironment
   { teams :: (Team, Team)  -- ^ Player Teams
-  , gen   :: StdGen        -- ^ StdGen used to run the game
   }
   deriving (Show)
 
-defaultGameEnvironment :: StdGen -> GameEnvironment
+defaultGameEnvironment :: GameEnvironment
 defaultGameEnvironment = GameEnvironment (Team P1 P3, Team P2 P4)
 
 data GameError
@@ -48,6 +47,7 @@ data GameError
   | WrongNumberPlayers Int       -- ^ Wrong Number of players
   | Unauthorized PlayerUUID      -- ^ Unauthorized UUID
   | WrongPlayerTurn PlayerUUID   -- ^ Wrong player turn
+  | CardNotAvailabe PlayerUUID Card  -- ^ Card is not availabe for player
   deriving (Eq, Show)
 
 instance ToJSON GameError where
@@ -82,7 +82,7 @@ data Action
   deriving (Eq, Show)
 
 data PlayerAction
-  = Give Card PlayerId      -- ^ Give Card to PlayerId
+  = Exchange Card           -- ^ Exchange Card to PlayerId
   | Move Card Peg Position  -- ^ Move Peg with Card to new Position
   | Discard Card            -- ^ Discard Card
   | SwitchPegs PlayerId Peg Peg   -- ^ Switch two pegs inclluding Player Id
@@ -90,10 +90,9 @@ data PlayerAction
   deriving (Eq, Show)
 
 instance ToJSON PlayerAction where
-  toJSON (Give c pid) = object
-    [ "type" .= ("Give" :: T.Text)
+  toJSON (Exchange c) = object
+    [ "type" .= ("Exchange" :: T.Text)
     , "card" .= c
-    , "pid"  .= pid
     ]
   toJSON (Move c peg pos) = object
     [ "type"      .= ("Move" :: T.Text)
@@ -113,7 +112,7 @@ instance FromJSON PlayerAction where
       "QuitGame"   -> return QuitGame
 
     where
-      parseGiveAction o = Give <$> o .: "card" <*> o .: "pid"
+      parseGiveAction o = Exchange <$> o .: "card"
       parseDiscard    o = Discard <$> o .: "card"
       parseSwitchPegs o = SwitchPegs <$> o .: "pid" <*> o .: "from" <*> o .: "to"
       parseMove       o = Move <$> o .: "card" <*> o .: "peg" <*> o .: "position"
@@ -126,7 +125,7 @@ data Player = Player
   { _uuid  :: PlayerUUID -- ^ Player uuid
   , _id    :: PlayerId   -- ^ Player id
   , _cards :: Hand       -- ^ Hand of cards
-  , _pegs  :: [Peg]      -- ^ Pegs
+  , _pegs  :: [Peg]      -- ^ Pegs  : TODO: change to Set here
   }
   deriving (Eq, Show)
 
@@ -377,6 +376,9 @@ defaultDeck =
         ]
     ]
 
+emptyDeck :: Deck
+emptyDeck = []
+
 shuffleDeck :: Deck -> IO Deck
 shuffleDeck = shuffleM
 
@@ -397,16 +399,20 @@ data GameState = GameState
   { _players :: S.Set Player      -- ^ Set of players in the game
   , _deck    :: Deck              -- ^ Current deck of card
   , _mode    :: Mode              -- ^ Mode of the Game
-  , _teams   :: (Team, Team)     -- ^ Teams of the game
+  , _teams   :: (Team, Team)      -- ^ Teams of the game
+  , _cardExchange :: M.Map PlayerId Card  -- ^ PlayerId exchanges Card
+  , _gen     :: StdGen              -- ^ StdGen
   }
-  deriving (Eq, Show)
+  deriving (Show)
 
-emptyGameState :: GameState
-emptyGameState = GameState
-  { _mode    = JoinWait
-  , _players = S.empty
-  , _deck    = defaultDeck
-  , _teams   = (Team P1 P3, Team P2 P4)
+emptyGameState :: StdGen -> GameState
+emptyGameState g = GameState
+  { _mode         = JoinWait
+  , _players      = S.empty
+  , _deck         = emptyDeck
+  , _teams        = (Team P1 P3, Team P2 P4)
+  , _cardExchange = M.empty
+  , _gen          = g
   }
 
 data Visibility a

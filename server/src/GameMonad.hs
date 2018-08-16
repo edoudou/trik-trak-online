@@ -4,7 +4,7 @@ module GameMonad where
 
 import           Control.Monad.Error.Class  (MonadError)
 import           Control.Monad.Random       (MonadRandom, Rand, StdGen,
-                                             evalRand)
+                                             runRand)
 import           Control.Monad.Reader.Class (MonadReader)
 import           Control.Monad.State.Class  (MonadState)
 import           Control.Monad.Trans.Except (ExceptT, runExceptT)
@@ -23,21 +23,31 @@ newtype GameMonad a
                                         (WriterT GameLog
                                                  (Rand StdGen)))) a)
   deriving
-    ( MonadError GameError
+    ( Functor
+    , Applicative
+    , Monad
+    , MonadError GameError
     , MonadState GameState
     , MonadWriter GameLog
     , MonadReader GameEnvironment
     , MonadRandom
-    , Functor
-    , Applicative
-    , Monad
     )
 
--- TODO: Refactor
-runGameMonad :: GameEnvironment -> GameState -> GameMonad a -> (Either GameError (a, GameState), GameLog)
+runGameMonad
+  :: GameEnvironment
+  -> GameState
+  -> GameMonad a
+  -> (Either GameError (a, GameState), GameLog)
 runGameMonad gameEnv gameState (GameMonad action) =
-  flip evalRand (gen gameEnv)
-    $ runWriterT
-    $ runExceptT
-    $ flip runStateT gameState
-    $ runReaderT action gameEnv
+  (result', logs)
+
+  where
+    randomAction = runWriterT
+      $ runExceptT
+      $ flip runStateT gameState
+      $ runReaderT action gameEnv
+
+    ((result, logs), gen') = runRand randomAction (_gen gameState)
+
+    -- TODO: use lens to simplify this boilerplate
+    result' = (\(x, s) -> (x, s { _gen = gen' })) <$> result

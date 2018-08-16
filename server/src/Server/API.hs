@@ -11,19 +11,19 @@ import           Control.Monad.Except     (throwError)
 import           Control.Monad.IO.Class   (liftIO)
 import           Control.Monad.Writer     (tell)
 import           Data.Aeson               (encode)
-import           Data.IORef               (IORef, newIORef, readIORef,
-                                           writeIORef)
 import           Data.Proxy               (Proxy (..))
 import           Data.Text                as T
+import           GHC.Conc                 (TVar, atomically, newTVarIO,
+                                           readTVar, writeTVar)
 import           Network.Wai.Handler.Warp (run)
 import           Servant.API
 import           Servant.Server
-import System.Random (getStdGen)
+import           System.Random            (getStdGen)
 
 
 import           Data.Game
 import qualified Data.Game                as DG
-import           Game                     (getState, join)
+import           Game                     (getState, join, printGameState)
 import           GameMonad                (GameMonad, runGameMonad)
 import           Server.Types             (Valid, invalid)
 
@@ -64,28 +64,32 @@ gameErrorToServantError gameError =
   err300 { errBody = encode (invalid gameError :: Valid GameError ()) }
 
 -- Natural Transformation: GameMonad ~> Handler
--- TODO: use STM instead of IORef!
-transformGameMonadToHandler :: GameEnvironment -> IORef GameState -> GameMonad a -> Handler a
-transformGameMonadToHandler gameEnv ref action = do
+transformGameMonadToHandler :: GameEnvironment -> TVar GameState -> GameMonad a -> Handler a
+transformGameMonadToHandler gameEnv tvar action = do
 
-  -- TODO: use STM!
-  gameState <- liftIO $ readIORef ref
+  (result, logs) <- liftIO $ atomically $ do
+    gameState <- readTVar tvar
+    let (result', logs') = runGameMonad gameEnv gameState action
 
-  -- Running Pure computation for the Game
-  let (result, logs) = runGameMonad gameEnv gameState action
+    case result' of
+      Left _ ->
+        return (result', logs')
 
-  -- TODO: Use a proper logger Monad to display log
+      Right (_, s') -> do
+        writeTVar tvar s'
+        return (result', logs')
+
+  -- TODO: use proper monad logger for printing logs
   liftIO $ print logs
 
   case result of
     Left gameError -> do
-      -- TODO: Use a proper logger Monad to display log
+      -- TODO: Use a proper logger Monad to display Error
       liftIO $ print gameError
       throwError $ gameErrorToServantError gameError
 
-    Right (x, s') -> do
-      -- TODO: use STM and TVar instead! to avoid write loss
-      liftIO $ writeIORef ref s'
+    Right (x, s) -> do
+      liftIO $ printGameState s
       return x
 
 gameServer :: ServerT GameAPI GameMonad
@@ -98,14 +102,12 @@ gameServer =
 runServer :: IO ()
 runServer = do
 
-  -- TODO: use STM instead of IORef for game states
-  -- to avoid concurrency issues or rely on redis
-  -- that handles transactions
-  ref <- newIORef emptyGameState
-  gen <- getStdGen
-  let gameEnv = defaultGameEnvironment gen
+  gen <- liftIO getStdGen
+  tvar <- newTVarIO $ emptyGameState gen
+
+  let gameEnv = defaultGameEnvironment
 
   -- TODO: use config for port and Debug Mode for instance
   run 8092
     $ serve gameAPI
-    $ hoistServer gameAPI (transformGameMonadToHandler gameEnv ref) gameServer
+    $ hoistServer gameAPI (transformGameMonadToHandler gameEnv tvar) gameServer

@@ -1,13 +1,17 @@
+{-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Game where
 
-import           Control.Monad          (when)
-import           Control.Monad.Except   (throwError)
-import           Control.Monad.State    (get, modify')
-import           Control.Monad.Writer   (tell)
-import qualified Data.Set               as S
-import           System.Random.Shuffle  (shuffleM)
+import           Control.Monad         (when)
+import           Control.Monad.Except  (throwError)
+import           Control.Monad.State   (get, modify')
+import           Control.Monad.Writer  (tell)
+import           Data.Foldable         (for_)
+import Data.List as L
+import qualified Data.Map as M
+import qualified Data.Set              as S
+import           System.Random.Shuffle (shuffleM)
 
 
 import           Data.Game
@@ -20,8 +24,57 @@ play _  = do
     return ()
 
 handle :: Action -> GameMonad GameResult
-handle (NPA JoinGame) = join
-handle _              = undefined
+handle (NPA JoinGame)                   = join
+handle (PA p (Exchange c))              = giveCard p c
+handle (PA p (Move c peg position))     = undefined
+handle (PA p (Discard c))               = undefined
+handle (PA p (SwitchPegs to peg1 peg2)) = undefined
+handle (PA p QuitGame)                  = undefined
+handle _                                = undefined
+
+giveCard :: Player -> Card -> GameMonad GameResult
+giveCard player card = do
+
+  gameState <- get
+
+  case L.find (== card) (_cards player) of
+    Nothing ->
+      throwError $ CardNotAvailabe (_uuid player) card
+
+    Just _ ->
+      let cardExchange' = M.insert (_id player) card (_cardExchange gameState)
+          hand' = L.delete card (_cards player)
+          players' = S.map (\p ->
+            if (_id p) == (_id player)
+            then p { _cards = hand' }
+            else p) (_players gameState)
+      in
+        modify' (\s -> s
+          { _cardExchange = cardExchange'
+          , _players = players'
+          })
+
+  return Unit
+
+printGameState :: GameState -> IO ()
+printGameState gameState = do
+
+  putStrLn ""
+
+  -- Game Mode
+  putStrLn $ "Mode: " ++ show (_mode gameState)
+
+  -- Player Information
+  for_ players $ \p -> do
+    putStrLn $ "PlayerId: " ++ show (_id p)
+    putStrLn $ "  PlayerUUID: " ++ show (_uuid p)
+    putStrLn $ "  Hand: " ++ show (_cards p)
+    putStrLn $ "  Pegs: " ++ show (_pegs p)
+    putStrLn ""
+
+  where
+    players :: [Player]
+    players = S.elems $ _players gameState
 
 checkPlayerNumber :: GameMonad ()
 checkPlayerNumber = do
@@ -82,10 +135,13 @@ join = do
       player <- mkPlayer playerId emptyHand defaultPegs
       tell ["Adding new Player to the Game: " ++ show player]
       modify' $ addPlayer player
-      when (length (_players gameState) == 3) deal
+      when (length (_players gameState) == 3) $ do
+        mkDeck  -- Making initial deck
+        deal    -- Dealing cards
       return $ NewPlayer (_uuid player) (_id player)
 
   where
+    -- TODO: use lens to remove the boilerplate
     addPlayer :: Player -> GameState -> GameState
     addPlayer player s = s { _players = S.insert player (_players s) }
 
