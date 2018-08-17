@@ -1,10 +1,10 @@
 name:                server
 version:             0.1.0.0
-github:              "githubuser/server"
+github:              "Chouffe/server"
 license:             BSD3
-author:              "Author name here"
-maintainer:          "example@example.com"
-copyright:           "2018 Author name here"
+author:              "Chouffe"
+maintainer:          "chouffe.caillau@gmail.com"
+copyright:           "2018 Arthur Caillau"
 
 extra-source-files:
 - README.md
@@ -63,5 +63,10 @@ tests:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
+    - -Wall
+    - -Wincomplete-uni-patterns
     dependencies:
     - server
+    - tasty
+    - tasty-quickcheck
+    - tasty-hspec

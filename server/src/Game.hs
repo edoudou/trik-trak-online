@@ -153,7 +153,6 @@ checkPlayerTurn :: Player -> GameMonad Bool
 checkPlayerTurn player = do
   gameState <- get
   case _mode gameState of
-    QuitGame     -> return True
     Play pid     -> return (pid == _id player)
     _            -> return False
 

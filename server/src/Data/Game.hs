@@ -91,6 +91,7 @@ instance ToJSON GameError where
   toJSON (CardAlreadyExchanged card uuid) = object
     [ "type" .= ("CardAlreadyExchanged " ++ show card ++ " for player " ++ show uuid) ]
 
+-- TODO: add a ActionAccepted constructor
 data GameResult
   = NewPlayer PlayerUUID PlayerId
   | Unit
@@ -118,6 +119,8 @@ data PlayerAction
   | QuitGame                -- ^ Quit the game
   deriving (Eq, Show)
 
+-- TODO: finish ToJSON
+-- TODO: activate Warnings for incomplete pattern matching
 instance ToJSON PlayerAction where
   toJSON (Exchange c) = object
     [ "type" .= ("Exchange" :: T.Text)
@@ -155,7 +158,7 @@ data Player = Player
   { _uuid  :: PlayerUUID -- ^ Player uuid
   , _id    :: PlayerId   -- ^ Player id
   , _cards :: Hand       -- ^ Hand of cards
-  , _pegs  :: [Peg]      -- ^ Pegs  : TODO: change to Set here
+  , _pegs  :: [Peg]      -- ^ Pegs
   }
   deriving (Eq, Show)
 
@@ -295,7 +298,6 @@ onTarget (PegBoard _ _) = False
 onTarget PegHome        = False
 onTarget (PegTarget _)  = True
 
-
 data Card
   = One
   | Two
@@ -322,16 +324,12 @@ instance FromJSON Card where
 
 type Deck       = [Card]
 type Hand       = [Card]
-data PlayerId
-  = P1
-  | P2
-  | P3
-  | P4
+data PlayerId = P1 | P2 | P3 | P4
   deriving (Eq, Show, Ord)
 
 instance FromJSON PlayerId where
   parseJSON = withScientific "PlayerId" $ \n ->
-    maybe (fail "Error") return $ do
+    maybe (fail "Error parsing PlayerId") return $ do
       i   <- toBoundedInteger n
       intToPlayerId i
 
@@ -405,9 +403,6 @@ defaultDeck =
 emptyDeck :: Deck
 emptyDeck = []
 
-shuffleDeck :: Deck -> IO Deck
-shuffleDeck = shuffleM
-
 mkNextPlayerId :: S.Set Player -> Maybe PlayerId
 mkNextPlayerId xs
   | S.null xs = Just P1
@@ -427,6 +422,7 @@ data GameState = GameState
   , _deck    :: Deck              -- ^ Current deck of card
   , _mode    :: Mode              -- ^ Mode of the Game
   , _teams   :: (Team, Team)      -- ^ Teams of the game
+  -- TODO: use a type to abstract over M.Map PlayerId Card
   , _cardExchange :: M.Map PlayerId Card  -- ^ PlayerId exchanges Card
   , _gen     :: StdGen              -- ^ StdGen
   }
