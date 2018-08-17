@@ -6,6 +6,4 @@
 * Write Tests with Tasty and Quickcheck
 * Use Lenses instead of nested record updates
 * Add a Monad Logger for server logging
-* Add more warnings (ghc options)
-* Install hlint
 * Play with extensible effects instead of Monad Transformers

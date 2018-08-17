@@ -4,7 +4,7 @@ module Game where
 
 import           Control.Monad         (when)
 import           Control.Monad.Except  (throwError)
-import           Control.Monad.State   (get, modify')
+import           Control.Monad.State   (get, gets, modify')
 import           Control.Monad.Writer  (tell)
 import           Data.Foldable         (for_)
 import           Data.List             as L
@@ -22,14 +22,74 @@ play _  = do
     _ <- get
     return ()
 
+-- TODO: finish me to be able to play the TakTic game!
 handle :: Action -> GameMonad GameResult
-handle (NPA JoinGame)                   = join
-handle (PA p (Exchange c))              = giveCard p c
+handle (NPA JoinGame) = join
+
+handle (PA p (Exchange c)) = do
+  mCardExchanged <- hasAlreadyExchangedCard p
+  case mCardExchanged of
+    Just c' -> throwError $ CardAlreadyExchanged c' (_uuid p)
+    Nothing -> do
+      tell ["Giving Card " ++ show c ++ " to Player " ++ show (_id p)]
+      giveCard p c
+      canExchange <- canExchangeCards
+      when canExchange $ do
+        gameState <- get
+        tell ["Exchanging cards among players with the following cards: " ++ show (_cardExchange gameState)]
+        exchangeCards
+      return Unit
 -- handle (PA p (Move c peg position))     = undefined
 -- handle (PA p (Discard c))               = undefined
 -- handle (PA p (SwitchPegs to peg1 peg2)) = undefined
--- handle (PA p QuitGame)                  = undefined
+
+handle (PA p QuitGame)                  = quitGame p
 handle _                                = undefined
+
+-- TODO: add state for players who left
+quitGame :: Player -> GameMonad GameResult
+quitGame player = do
+  modify' (\s -> s { _mode = Winner winnerTeam })
+  return Unit
+
+  where
+    winnerTeam :: Team
+    winnerTeam = nextTeam $ playerTeam $ _id player
+
+generatePossibleActions :: GameState -> Player -> [PlayerAction]
+generatePossibleActions gameState player = [QuitGame]
+
+canReach :: GameState -> Peg -> Position -> Bool
+canReach gameState peg position = undefined
+
+move :: GameState -> Player -> Peg -> Position -> GameState
+move gameState player peg position = undefined
+
+hasAlreadyExchangedCard :: Player -> GameMonad (Maybe Card)
+hasAlreadyExchangedCard player = gets $ M.lookup (_id player) . _cardExchange
+
+canExchangeCards :: GameMonad Bool
+canExchangeCards = do
+  gameState <- get
+  return $ length (M.keys (_cardExchange gameState)) == 4
+
+exchangeCards :: GameMonad ()
+exchangeCards = do
+  gameState <- get
+  -- TODO: Use lenses to clean up
+  modify' (\s -> s
+            { _players = exchangeCards' (_players gameState) (_cardExchange gameState)
+            , _cardExchange = M.empty
+            , _mode = Play (_roundPlayerTurn s)
+            , _roundPlayerTurn = nextPlayer (_roundPlayerTurn s)
+            })
+  where
+    exchangeCards' :: S.Set Player -> M.Map PlayerId Card -> S.Set Player
+    exchangeCards' players cardsToExchange = S.fromList $ do
+      player <- S.elems players
+      case M.lookup (partner (_id player)) cardsToExchange of
+        Nothing   -> return player
+        Just card -> return player { _cards = card : _cards player }
 
 giveCard :: Player -> Card -> GameMonad GameResult
 giveCard player card = do
@@ -48,6 +108,7 @@ giveCard player card = do
             then p { _cards = hand' }
             else p) (_players gameState)
       in
+        -- TODO: use lenses
         modify' (\s -> s
           { _cardExchange = cardExchange'
           , _players = players'
@@ -65,6 +126,9 @@ printGameState gameState = do
 
   -- Deck
   putStrLn $ "Deck: " ++ show (_deck gameState)
+
+  -- CardExchange
+  putStrLn $ "CardExchange: " ++ show (_cardExchange gameState)
 
   -- Player Information
   putStrLn ""
@@ -89,8 +153,9 @@ checkPlayerTurn :: Player -> GameMonad Bool
 checkPlayerTurn player = do
   gameState <- get
   case _mode gameState of
-    Play pid -> return (pid == _id player)
-    _        -> return False
+    QuitGame     -> return True
+    Play pid     -> return (pid == _id player)
+    _            -> return False
 
 mkDeck :: GameMonad Deck
 mkDeck = do
@@ -136,7 +201,7 @@ join = do
 
   gameState <- get
 
-  case nextPlayerId (_players gameState) of
+  case mkNextPlayerId (_players gameState) of
     Nothing       -> do
       tell ["Cannot add a new player, the party is full"]
       throwError JoinTooManyPlayers

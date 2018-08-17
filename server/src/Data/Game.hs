@@ -19,7 +19,6 @@ import           System.Random.Shuffle (shuffleM)
 
 data Mode
   = JoinWait       -- ^ Waiting for other players to join
-  -- | DealCards      -- ^ Dealing cards for all players
   | CardExchange   -- ^ Exchanging cards between teammates
   | Winner Team    -- ^ End of the game with a winner team
   | Play PlayerId  -- ^ Regular round play with PlayerId playing
@@ -38,6 +37,28 @@ newtype GameEnvironment = GameEnvironment
   }
   deriving (Show)
 
+partner :: PlayerId -> PlayerId
+partner P1 = P3
+partner P3 = P1
+partner P2 = P4
+partner P4 = P2
+
+playerTeam :: PlayerId -> Team
+playerTeam P1 = Team P1 P3
+playerTeam P3 = Team P1 P3
+playerTeam P2 = Team P2 P4
+playerTeam P4 = Team P2 P4
+
+nextTeam :: Team -> Team
+nextTeam (Team P1 P3) = Team P2 P4
+nextTeam _ = Team P1 P3
+
+nextPlayer :: PlayerId -> PlayerId
+nextPlayer P1 = P2
+nextPlayer P2 = P3
+nextPlayer P3 = P4
+nextPlayer P4 = P1
+
 defaultGameEnvironment :: GameEnvironment
 defaultGameEnvironment = GameEnvironment (Team P1 P3, Team P2 P4)
 
@@ -49,6 +70,7 @@ data GameError
   | WrongPlayerTurn PlayerUUID   -- ^ Wrong player turn
   | CardNotAvailabe PlayerUUID Card  -- ^ Card is not availabe for player
   | PlayerNotFound PlayerUUID    -- ^ Player Not Found exception
+  | CardAlreadyExchanged Card PlayerUUID  -- ^ Card is already exchanged for PlayerUUID
   deriving (Eq, Show)
 
 instance ToJSON GameError where
@@ -62,6 +84,12 @@ instance ToJSON GameError where
     [ "type" .= ("Unauthorized for uuid: " ++ show uuid) ]
   toJSON (WrongPlayerTurn uuid) = object
     [ "type" .= ("WrongPlayerTurn for uuid: " ++ show uuid) ]
+  toJSON (CardNotAvailabe uuid card) = object
+    [ "type" .= ("CardNotAvailabe " ++ show card ++ " for player " ++ show uuid) ]
+  toJSON (PlayerNotFound uuid) = object
+    [ "type" .= ("PlayerNotFound for uuid: " ++ show uuid) ]
+  toJSON (CardAlreadyExchanged card uuid) = object
+    [ "type" .= ("CardAlreadyExchanged " ++ show card ++ " for player " ++ show uuid) ]
 
 data GameResult
   = NewPlayer PlayerUUID PlayerId
@@ -106,14 +134,15 @@ instance FromJSON PlayerAction where
   parseJSON = withObject "PlayerAction" $ \o -> do
     actionType :: String <- o .: "type"
     case actionType of
-      "Give"       -> parseGiveAction o
+      "Exchange"   -> parseExchange o
       "Move"       -> parseMove o
       "Discard"    -> parseDiscard o
       "SwitchPegs" -> parseSwitchPegs o
       "QuitGame"   -> return QuitGame
+      _            -> fail "Error Parsing PlayerAction"
 
     where
-      parseGiveAction o = Exchange <$> o .: "card"
+      parseExchange   o = Exchange <$> o .: "card"
       parseDiscard    o = Discard <$> o .: "card"
       parseSwitchPegs o = SwitchPegs <$> o .: "pid" <*> o .: "from" <*> o .: "to"
       parseMove       o = Move <$> o .: "card" <*> o .: "peg" <*> o .: "position"
@@ -379,8 +408,8 @@ emptyDeck = []
 shuffleDeck :: Deck -> IO Deck
 shuffleDeck = shuffleM
 
-nextPlayerId :: S.Set Player -> Maybe PlayerId
-nextPlayerId xs
+mkNextPlayerId :: S.Set Player -> Maybe PlayerId
+mkNextPlayerId xs
   | S.null xs = Just P1
   | otherwise = intToPlayerId
       $ inc

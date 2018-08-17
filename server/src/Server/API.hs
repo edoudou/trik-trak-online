@@ -61,11 +61,15 @@ playHandler uuid playerAction = do
   case findPlayer gameState uuid of
     Nothing ->
       throwError $ PlayerNotFound uuid
-    Just player -> do
-      b <- checkPlayerTurn player
-      if b
-      then handle $ PA player playerAction
-      else throwError $ WrongPlayerTurn uuid
+    Just player ->
+      withPlayerTurn player $ handle $ PA player playerAction
+
+withPlayerTurn :: Player -> GameMonad a -> GameMonad a
+withPlayerTurn player action = do
+  b <- checkPlayerTurn player
+  if b
+  then action
+  else throwError $ WrongPlayerTurn (_uuid player)
 
 gameErrorToServantError :: GameError -> ServantErr
 gameErrorToServantError gameError@(DG.Unauthorized _)  =
