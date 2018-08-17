@@ -1,0 +1,72 @@
+name:                server
+version:             0.1.0.0
+github:              "Chouffe/server"
+license:             BSD3
+author:              "Chouffe"
+maintainer:          "chouffe.caillau@gmail.com"
+copyright:           "2018 Arthur Caillau"
+
+extra-source-files:
+- README.md
+- ChangeLog.md
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            Web
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on GitHub at <https://github.com/githubuser/server#readme>
+
+dependencies:
+- aeson
+- base >= 4.7 && < 5
+- bytestring
+- containers
+- MonadRandom
+- mtl
+- random
+- random-shuffle
+- scientific
+- servant
+- servant-client
+- servant-server
+- stm
+- text
+- time
+- transformers
+- uuid
+- warp
+
+library:
+  source-dirs: src
+
+executables:
+  server-exe:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    - -Wall
+    - -Wincomplete-uni-patterns
+    dependencies:
+    - server
+
+tests:
+  server-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    - -Wall
+    - -Wincomplete-uni-patterns
+    dependencies:
+    - server
+    - tasty
+    - tasty-quickcheck
+    - tasty-hspec
