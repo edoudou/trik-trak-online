@@ -15,7 +15,6 @@ import           Data.Scientific       (toBoundedInteger)
 import qualified Data.Set              as S
 import qualified Data.Text             as T
 import           Data.UUID             (UUID)
-import           System.Random.Shuffle (shuffleM)
 
 data Mode
   = JoinWait       -- ^ Waiting for other players to join
@@ -111,6 +110,12 @@ data Action
   | NPA NoPlayerAction
   deriving (Eq, Show)
 
+instance ToJSON Action where
+  toJSON (PA player action) = object
+    [ "pid"    .= _id player
+    , "action" .= action
+    ]
+
 data PlayerAction
   = Exchange Card           -- ^ Exchange Card to PlayerId
   | Move Card Peg Position  -- ^ Move Peg with Card to new Position
@@ -153,6 +158,9 @@ instance FromJSON PlayerAction where
 data NoPlayerAction
   = JoinGame      -- ^ Join the Game
   deriving (Eq, Show)
+
+instance ToJSON NoPlayerAction where
+  toJSON JoinGame = toJSON $ show JoinGame
 
 data Player = Player
   { _uuid  :: PlayerUUID -- ^ Player uuid
@@ -197,7 +205,7 @@ instance FromJSON PegMode where
 data Position
   = BP BoardPosition
   | TP TargetPosition
-  deriving (Eq, Show)
+  deriving (Eq, Show, Ord)
 
 instance FromJSON Position where
   parseJSON = withObject "Position" $ \o -> do
@@ -225,7 +233,17 @@ instance ToJSON Position where
 
 newtype BoardPosition
   = BoardPosition Int  -- ^ Position on the Board
-  deriving (Eq, Show)
+  deriving (Eq, Show, Ord)
+
+startPosition :: BoardPosition
+startPosition = BoardPosition 0
+
+endPosition :: BoardPosition
+endPosition = BoardPosition $ 4 * 16 - 1
+
+-- TODO: remove
+runBoardPosition :: BoardPosition -> Int
+runBoardPosition (BoardPosition x) = x
 
 instance FromJSON BoardPosition where
   parseJSON = withScientific "BoardPosition" $ \n ->
@@ -238,7 +256,7 @@ instance ToJSON BoardPosition where
 
 newtype TargetPosition
   = TargetPosition Int  -- ^ Position on the Target
-  deriving (Eq, Show)
+  deriving (Eq, Show, Ord)
 
 instance ToJSON TargetPosition where
   toJSON (TargetPosition x) = toJSON x
@@ -295,8 +313,16 @@ instance ToJSON Peg where
 
 onTarget :: Peg -> Bool
 onTarget (PegBoard _ _) = False
-onTarget PegHome        = False
-onTarget (PegTarget _)  = True
+onTarget _        = False
+
+onBoard :: Peg -> Bool
+onBoard (PegBoard _ _) = True
+onBoard _ = False
+
+pegMode :: Peg -> PegMode
+pegMode PegHome = Normal
+pegMode (PegTarget _) = Stake
+pegMode (PegBoard _ mode) = mode
 
 data Card
   = One
@@ -311,7 +337,7 @@ data Card
   | Ten
   | Twelve
   | Switch
-  deriving (Eq, Show)
+  deriving (Eq, Show, Ord)
 
 instance ToJSON Card where
   toJSON = toJSON . cardToInt
@@ -390,6 +416,25 @@ cardToInt Ten    = 10
 cardToInt Switch = 11
 cardToInt Twelve = 12
 
+cardToMove :: Card -> Int
+cardToMove One = 1
+cardToMove Two = 2
+cardToMove Three = 3
+cardToMove Four = -4
+cardToMove Five = 5
+cardToMove Six = 6
+cardToMove Seven = 7
+cardToMove Eight = 8
+cardToMove Nine = 9
+cardToMove Ten = 10
+cardToMove Switch = 0
+cardToMove Twelve = 12
+
+startCard :: Card -> Bool
+startCard One = True
+startCard Ten = True
+startCard _ = False
+
 defaultDeck :: Deck
 defaultDeck =
     L.concat
@@ -455,18 +500,22 @@ instance ToJSON a => ToJSON (Visibility a) where
   toJSON (Hidden _)  = toJSON ("hidden" :: T.Text)
 
 data FilteredGameState = FilteredGameState
-  { _fmode  :: Mode
-  , _fteams :: (Team, Team)
-  , _fcards :: M.Map PlayerId [Visibility Card]
-  , _fpegs  :: M.Map PlayerId [Peg]
+  { _fmode  :: Mode                              -- ^ Game Mode
+  , _fteams :: (Team, Team)                      -- ^ Teams
+  , _fcards :: M.Map PlayerId [Visibility Card]  -- ^ Player's cards
+  , _fpegs  :: M.Map PlayerId [Peg]              -- ^ Player's pegs
+  , _factions :: [PlayerAction]                  -- ^ Actions that can be performed
+  , _fhistory :: [Action]                         -- ^ History of all Actions performed so far
   }
 
 instance ToJSON FilteredGameState where
   toJSON s = object
-    [ "mode"  .= _fmode s
-    , "teams" .= _fteams s
-    , "cards" .= _fcards s
-    , "pegs"  .= _fpegs s
+    [ "mode"   .= _fmode s
+    , "teams"  .= _fteams s
+    , "cards"  .= _fcards s
+    , "pegs"   .= _fpegs s
+    , "actions".= _factions s
+    , "history".= _fhistory s
     ]
 
 findPlayer :: GameState -> PlayerUUID -> Maybe Player
@@ -504,6 +553,8 @@ filterGameState player gameState = FilteredGameState
   , _fteams = _teams gameState
   , _fcards = filterCard (_players gameState) player
   , _fpegs  = allPegs (_players gameState)
+  , _factions = []
+  , _fhistory = []
   }
   where
     allPegs :: S.Set Player -> M.Map PlayerId [Peg]

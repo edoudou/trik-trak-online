@@ -20,10 +20,18 @@ filteredCards = M.fromList
   , (P4, setHidden <$> [One, Two, One, Switch])
   ]
 
+actions :: [PlayerAction]
+actions = [QuitGame]
+
+history :: [Action]
+history = []
+
 filteredGameState :: FilteredGameState
 filteredGameState = FilteredGameState
   { _fteams = (Team P1 P3, Team P2 P4)
   , _fcards = filteredCards
   , _fpegs = filteredPegs
   , _fmode = Play P1
+  , _factions = actions
+  , _fhistory = history
   }

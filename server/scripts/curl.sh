@@ -6,9 +6,8 @@ curl -X POST http://localhost:8092/join
 # Exchange a card
 curl --header "Content-Type: application/json" \
      -X POST \
-     --data '{"type": "Exchange", "card": 12}' \
-     http://localhost:8092/play/ee7a4600-1bca-4c66-bfe4-6862c958db36
-
+     --data '{"type": "Exchange", "card": 2}' \
+     http://localhost:8092/play/0796006a-330e-40ba-b247-c91e68176ab0
 # Quit the Game
 curl --header "Content-Type: application/json" \
      -X POST \

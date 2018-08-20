@@ -2,13 +2,14 @@
 
 module Game where
 
-import           Control.Monad         (when)
+import           Control.Monad         (when, guard)
 import           Control.Monad.Except  (throwError)
 import           Control.Monad.State   (get, gets, modify')
 import           Control.Monad.Writer  (tell)
 import           Data.Foldable         (for_)
 import           Data.List             as L
 import qualified Data.Map              as M
+import Data.Maybe (maybeToList)
 import qualified Data.Set              as S
 import           System.Random.Shuffle (shuffleM)
 
@@ -26,25 +27,40 @@ play _  = do
 handle :: Action -> GameMonad GameResult
 handle (NPA JoinGame) = join
 
-handle (PA p (Exchange c)) = do
-  mCardExchanged <- hasAlreadyExchangedCard p
+handle (PA player (Exchange card)) = do
+  mCardExchanged <- hasAlreadyExchangedCard player
   case mCardExchanged of
-    Just c' -> throwError $ CardAlreadyExchanged c' (_uuid p)
+    Just c' -> throwError $ CardAlreadyExchanged c' (_uuid player)
     Nothing -> do
-      tell ["Giving Card " ++ show c ++ " to Player " ++ show (_id p)]
-      giveCard p c
+      tell ["Giving Card " ++ show card ++ " to Player " ++ show (_id player)]
+      giveCard player card
       canExchange <- canExchangeCards
       when canExchange $ do
         gameState <- get
         tell ["Exchanging cards among players with the following cards: " ++ show (_cardExchange gameState)]
         exchangeCards
       return Unit
--- handle (PA p (Move c peg position))     = undefined
--- handle (PA p (Discard c))               = undefined
--- handle (PA p (SwitchPegs to peg1 peg2)) = undefined
+handle act@(PA player action@(Move card peg position)) = do
+  gameState <- get
+  let playerActions = cardActions (_players gameState) (_id player)
+  if action `L.notElem` playerActions
+  then throwError $ InvalidAction act
+  else do
+    tell ["Performing valid action: " ++ show action]
+    -- TODO: implement movePeg
+    -- TODO: add some logging
+    -- movePeg player peg position >> useCard card >> return Unit
+    return Unit
 
 handle (PA p QuitGame)                  = quitGame p
 handle _                                = undefined
+
+movePeg :: Player -> Peg -> Position -> GameMonad ()
+movePeg player peg position = return ()
+
+-- TODO
+useCard :: Player -> Card -> GameMonad ()
+useCard player card = return ()
 
 -- TODO: add state for players who left
 quitGame :: Player -> GameMonad GameResult
@@ -56,14 +72,134 @@ quitGame player = do
     winnerTeam :: Team
     winnerTeam = nextTeam $ playerTeam $ _id player
 
-generatePossibleActions :: GameState -> Player -> [PlayerAction]
-generatePossibleActions gameState player = [QuitGame]
+cardAction :: S.Set Player -> PlayerId -> Peg -> Card -> [PlayerAction]
+cardAction players pid peg card = moves ++ switches
+  where
+    switches :: [PlayerAction]
+    switches = switch players pid card peg
 
-canReach :: GameState -> Peg -> Position -> Bool
-canReach gameState peg position = undefined
+    moves :: [PlayerAction]
+    moves = Move card peg <$> filter (blockedByStakePeg players pid peg)
+                                     (move pid card peg)
 
-move :: GameState -> Player -> Peg -> Position -> GameState
-move gameState player peg position = undefined
+cardActions :: S.Set Player -> PlayerId -> [PlayerAction]
+cardActions players pid =
+  case playerActions of
+    [] -> discards
+    _ ->  playerActions
+
+  where
+    cards :: [Card]
+    cards = do
+      player <- S.elems players
+      guard (_id player == pid)
+      _cards player
+
+    playerActions :: [PlayerAction]
+    playerActions = L.nub $ L.concat $ do
+      player <- S.elems players
+      guard (_id player == pid)
+      card   <- cards
+      peg    <- _pegs player
+      return $ cardAction players pid peg card
+
+    discards :: [PlayerAction]
+    discards = Discard <$> cards
+
+traversedPositions :: PlayerId -> Peg -> Position -> [Position]
+traversedPositions pid PegHome to = BP (startBoardPosition pid) : traversedPositions pid (PegBoard (startBoardPosition pid) Stake) to
+traversedPositions _ (PegBoard (BoardPosition from) _) (BP (BoardPosition to))
+  | to >= from = [BP (BoardPosition x) | x <- [ from + 1 .. to ]]
+  | to < from =
+     [ BP (BoardPosition x) |
+       x <- [ runBoardPosition startPosition .. to ]
+            ++ [ from .. runBoardPosition endPosition ]
+     ]
+traversedPositions pid from@(PegBoard (BoardPosition _) _) to@(TP (TargetPosition _)) =
+  traversedPositions pid from (BP (startBoardPosition pid))
+  ++ [TP (TargetPosition 0)]
+  ++ traversedPositions pid (PegTarget (TargetPosition 0)) to
+traversedPositions _ (PegTarget (TargetPosition from)) (TP (TargetPosition to)) =
+  [TP (TargetPosition x) | x <- [from + 1 .. to]]
+traversedPositions _ _ _ = []
+
+blockedByStakePeg :: S.Set Player -> PlayerId -> Peg -> Position -> Bool
+blockedByStakePeg players pid peg to =
+  (/= 0)
+  $ S.size
+  $ S.intersection traversedPos
+  $ S.union blockedBoardPositions blockedTargetPositions
+
+  where
+    traversedPos :: S.Set Position
+    traversedPos = S.fromList $ traversedPositions pid peg to
+
+    blockedBoardPositions :: S.Set Position
+    blockedBoardPositions = S.fromList $ do
+      player <- S.elems players
+      pg    <- _pegs player
+      case pg of
+        PegBoard bp Stake -> return $ BP bp
+        _                 -> []
+
+    blockedTargetPositions :: S.Set Position
+    blockedTargetPositions = S.fromList $ do
+      player <- S.elems players
+      guard (_id player == pid)
+      pg    <- _pegs player
+      case pg of
+        PegTarget tp -> return $ TP tp
+        _            -> []
+
+move :: PlayerId -> Card -> Peg -> [Position]
+move pid card PegHome
+  | startCard card = return $ BP (startBoardPosition pid)
+  | otherwise      = []
+move _ card (PegTarget tp) = TP <$> maybeToList (moveTarget card tp)
+move pid card (PegBoard bp _) =
+  BP bp' : (TP <$> maybeToList tp')
+  where
+    bp' :: BoardPosition
+    bp' = moveBoard card bp
+
+    tp' :: Maybe TargetPosition
+    tp' = moveFromBoardToTarget pid card bp
+
+switch :: S.Set Player -> PlayerId -> Card -> Peg -> [PlayerAction]
+switch players pid Switch peg@(PegBoard _ _) = do
+  player <- S.elems players
+  ppeg <- _pegs player
+  guard (onBoard ppeg)
+  guard (_id player /= pid && pegMode ppeg == Stake)
+  return $ SwitchPegs (_id player) peg ppeg
+switch _ _ _ _ = []
+
+moveTarget :: Card -> TargetPosition -> Maybe TargetPosition
+moveTarget card (TargetPosition x)
+  | cardToMove card <= 0     = Nothing
+  | cardToMove card + x <= 3 = Just $ TargetPosition (cardToMove card + x)
+  | otherwise                = Nothing
+
+moveBoard :: Card -> BoardPosition -> BoardPosition
+moveBoard card (BoardPosition x) = BoardPosition $ cardToMove card + x
+
+moveFromBoardToTarget :: PlayerId -> Card -> BoardPosition -> Maybe TargetPosition
+moveFromBoardToTarget pid card (BoardPosition x)
+  | cardToMove card <= 0                                = Nothing
+  | targetPositionValue < 3 && targetPositionValue >= 0 = Just $ TargetPosition targetPositionValue
+  | otherwise                                           = Nothing
+
+  where
+    (BoardPosition boardPositionStart) = startBoardPosition pid
+
+    targetPositionValue :: Int
+    targetPositionValue = x + cardToMove card - boardPositionStart
+
+startBoardPosition :: PlayerId -> BoardPosition
+startBoardPosition P1 = BoardPosition 0
+startBoardPosition P2 = BoardPosition 16
+startBoardPosition P3 = BoardPosition 32
+startBoardPosition P4 = BoardPosition 48
 
 hasAlreadyExchangedCard :: Player -> GameMonad (Maybe Card)
 hasAlreadyExchangedCard player = gets $ M.lookup (_id player) . _cardExchange
@@ -153,8 +289,9 @@ checkPlayerTurn :: Player -> GameMonad Bool
 checkPlayerTurn player = do
   gameState <- get
   case _mode gameState of
-    Play pid     -> return (pid == _id player)
-    _            -> return False
+    Play pid     -> return (pid == _id player)  -- ^ Only the player with the assiged pid can play
+    CardExchange -> return True                 -- ^ Anyone can exchange cards at the same time
+    _            -> return False                -- ^ Not the player's turn
 
 mkDeck :: GameMonad Deck
 mkDeck = do
