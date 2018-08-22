@@ -37,6 +37,7 @@ dependencies:
 - time
 - transformers
 - uuid
+- vector
 - warp
 
 library:
@@ -66,6 +67,8 @@ tests:
     - -Wall
     - -Wincomplete-uni-patterns
     dependencies:
+    - http-client
+    - http-client-tls
     - server
     - tasty
     - tasty-quickcheck

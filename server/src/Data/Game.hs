@@ -15,6 +15,7 @@ import           Data.Scientific       (toBoundedInteger)
 import qualified Data.Set              as S
 import qualified Data.Text             as T
 import           Data.UUID             (UUID)
+import qualified Data.Vector            as V
 
 data Mode
   = JoinWait       -- ^ Waiting for other players to join
@@ -27,6 +28,15 @@ instance ToJSON Mode where
   toJSON (Winner team) = object [ "type" .= ("Winner" :: T.Text), "team" .= team ]
   toJSON (Play pid) = object [ "type" .= ("Play" :: T.Text), "pid" .= pid]
   toJSON mode = object [ "type" .= show mode ]
+
+instance FromJSON Mode where
+  parseJSON = withObject "Mode" $ \o -> do
+    modeType :: String <- o .: "type"
+    case modeType of
+      "JoinWait" -> return JoinWait
+      "CardExchange" -> return CardExchange
+      "Winner" -> Winner <$> o.: "team"
+      "Play" -> Play <$> o .: "pid"
 
 -- TODO: use a better type. (LogLevel, Text) for instance
 type GameLog = [String]
@@ -90,7 +100,7 @@ instance ToJSON GameError where
   toJSON (CardAlreadyExchanged card uuid) = object
     [ "type" .= ("CardAlreadyExchanged " ++ show card ++ " for player " ++ show uuid) ]
 
--- TODO: add a ActionAccepted constructor
+-- TODO: add a FilteredGameState
 data GameResult
   = NewPlayer PlayerUUID PlayerId
   | Unit
@@ -102,6 +112,9 @@ instance ToJSON GameResult where
     , "pid"  .= pid
     ]
   toJSON Unit = toJSON ("OK" :: T.Text)
+
+instance FromJSON GameResult where
+  parseJSON = withObject "GameResult" $ \o -> return Unit
 
 type PlayerUUID = UUID  -- ^ Type synonym for Player UUID
 
@@ -359,11 +372,19 @@ instance FromJSON PlayerId where
       i   <- toBoundedInteger n
       intToPlayerId i
 
+-- TODO
+-- instance FromJSONKey PlayerId where
+
+
 data Team = Team PlayerId PlayerId
   deriving (Eq, Show, Ord)
 
 instance ToJSON Team where
   toJSON (Team pid1 pid2) = toJSON (pid1, pid2)
+
+instance FromJSON Team where
+  parseJSON = withArray "Team" $ \a ->
+    Team <$> parseJSON (a V.! 0) <*> parseJSON (a V.! 1)
 
 playerIdToInt :: PlayerId -> Int
 playerIdToInt P1 = 1
@@ -517,6 +538,22 @@ instance ToJSON FilteredGameState where
     , "actions".= _factions s
     , "history".= _fhistory s
     ]
+
+instance FromJSON FilteredGameState where
+  parseJSON = withObject "FilteredGameState" $ \o -> do
+    mode <- o .: "mode"
+    teams <- o .: "teams"
+    -- cards <- o .: "cards"
+    actions <- o .: "actions"
+    -- history <- o .: "history"
+    return $ FilteredGameState mode teams M.empty M.empty actions []
+    -- FilteredGameState <$>
+    --   o .: "mode" <*>
+    --   o .: "teams" <*>
+    --   o .: "cards" <*>
+    --   o .: "pegs" <*>
+    --   o .: "actions" <*>
+    --   o .: "history"
 
 findPlayer :: GameState -> PlayerUUID -> Maybe Player
 findPlayer s uuid = L.find ((== uuid) . _uuid) players

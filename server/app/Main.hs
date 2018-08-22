@@ -1,6 +1,9 @@
 module Main where
 
-import Server.API (runServer)
+import           Control.Monad      (void)
+
+import           Server.API         (runServer)
+import           Server.Environment (Environment (Prod))
 
 main :: IO ()
-main = runServer
+main = void $ runServer Prod

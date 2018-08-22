@@ -3,9 +3,30 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators       #-}
 
-module Server.API where
+module Server.API
+  ( GameAPI
+  , gameAPI
+  , gameServer
+
+  , withServer
+  , runServer
+  , killServer
+
+  , Config
+  , cEnvironnment
+  , mkConfig
+
+  , Handle
+  , hConfig
+  , hDB
+  , hServerThread
+  )
+
+  where
 
 
+import           Control.Concurrent       (ThreadId, forkIO, killThread, threadDelay)
+import           Control.Exception        (bracket)
 import           Control.Monad.Except     (throwError)
 import           Control.Monad.IO.Class   (liftIO)
 import           Control.Monad.State      (get)
@@ -18,7 +39,7 @@ import           GHC.Conc                 (TVar, atomically, newTVarIO,
 import           Network.Wai.Handler.Warp (run)
 import           Servant.API
 import           Servant.Server
-import           System.Random            (getStdGen)
+import           System.Random            (StdGen, getStdGen)
 
 
 import           Data.Game
@@ -26,7 +47,10 @@ import qualified Data.Game                as DG
 import           Game                     (checkPlayerTurn, getState, handle,
                                            join, printGameState)
 import           GameMonad                (GameMonad, runGameMonad)
-import           Server.Types             (Valid, invalid)
+import           Server.Environment       (Environment)
+import           Server.Types             (Valid, invalid, port)
+
+
 
 type GameAPI
   =    "health"                           -- ^ API Health
@@ -78,7 +102,11 @@ gameErrorToServantError gameError =
   err300 { errBody = encode (invalid gameError :: Valid GameError ()) }
 
 -- Natural Transformation: GameMonad ~> Handler
-transformGameMonadToHandler :: GameEnvironment -> TVar GameState -> GameMonad a -> Handler a
+transformGameMonadToHandler
+  :: GameEnvironment
+  -> TVar GameState
+  -> GameMonad a
+  -> Handler a
 transformGameMonadToHandler gameEnv tvar action = do
 
   (result, logs) <- liftIO $ atomically $ do
@@ -113,15 +141,49 @@ gameServer =
   stateHandler  :<|>
   playHandler
 
-runServer :: IO ()
-runServer = do
+-- TODO: add config for Logger there
+data Config
+  = Config
+    { cStdGen       :: StdGen            -- ^ Initial StdGen
+    , cGameEnv      :: GameEnvironment   -- ^ Game Environment
+    , cEnvironnment :: Environment       -- ^ Environment to run the server
+    }
 
+-- TODO: add a Logger Resource in there
+data Handle
+  = Handle
+    { hDB           :: TVar GameState  -- ^ In memory Database
+    , hConfig       :: Config          -- ^ Server Config
+    , hServerThread :: ThreadId        -- ^ Server threadId
+    }
+
+withServer :: Config -> (Handle -> IO a) -> IO a
+withServer config = bracket (startServer config) killServer
+
+mkConfig :: Environment -> IO Config
+mkConfig env = do
   gen <- liftIO getStdGen
-  tvar <- newTVarIO $ emptyGameState gen
+  return $ Config gen defaultGameEnvironment env
 
-  let gameEnv = defaultGameEnvironment
-
-  -- TODO: use config for port and Debug Mode for instance
-  run 8092
+startServer :: Config -> IO Handle
+startServer config = do
+  tvar <- newTVarIO $ emptyGameState (cStdGen config)
+  tid <- forkIO
+    $ run (port (cEnvironnment config))
     $ serve gameAPI
-    $ hoistServer gameAPI (transformGameMonadToHandler gameEnv tvar) gameServer
+    $ hoistServer gameAPI
+      (transformGameMonadToHandler (cGameEnv config) tvar)
+      gameServer
+
+  -- Hack :( wait till the server is properly started
+  threadDelay 1000
+
+  return $ Handle tvar config tid
+
+killServer :: Handle -> IO ()
+killServer = killThread . hServerThread
+
+runServer :: Environment -> IO Handle
+runServer env = do
+  config <- mkConfig env
+  startServer config

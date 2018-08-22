@@ -2,14 +2,14 @@
 
 module Game where
 
-import           Control.Monad         (when, guard)
+import           Control.Monad         (guard, when)
 import           Control.Monad.Except  (throwError)
 import           Control.Monad.State   (get, gets, modify')
 import           Control.Monad.Writer  (tell)
 import           Data.Foldable         (for_)
 import           Data.List             as L
 import qualified Data.Map              as M
-import Data.Maybe (maybeToList)
+import           Data.Maybe            (maybeToList)
 import qualified Data.Set              as S
 import           System.Random.Shuffle (shuffleM)
 
@@ -86,7 +86,7 @@ cardActions :: S.Set Player -> PlayerId -> [PlayerAction]
 cardActions players pid =
   case playerActions of
     [] -> discards
-    _ ->  playerActions
+    _  ->  playerActions
 
   where
     cards :: [Card]
