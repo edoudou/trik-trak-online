@@ -6,11 +6,11 @@ import           Control.Monad         (guard, when)
 import           Control.Monad.Except  (throwError)
 import           Control.Monad.State   (get, gets, modify')
 import           Control.Monad.Writer  (tell)
-import           Data.Foldable         (for_)
 import           Data.List             as L
 import qualified Data.Map              as M
 import           Data.Maybe            (maybeToList)
 import qualified Data.Set              as S
+import           Data.String           (unlines)
 import           System.Random.Shuffle (shuffleM)
 
 
@@ -252,32 +252,21 @@ giveCard player card = do
 
   return Unit
 
-printGameState :: GameState -> IO ()
-printGameState gameState = do
-
-  putStrLn ""
-
-  -- Game Mode
-  putStrLn $ "Mode: " ++ show (_mode gameState)
-
-  -- Deck
-  putStrLn $ "Deck: " ++ show (_deck gameState)
-
-  -- CardExchange
-  putStrLn $ "CardExchange: " ++ show (_cardExchange gameState)
-
-  -- Player Information
-  putStrLn ""
-  for_ players $ \p -> do
-    putStrLn $ "PlayerId: " ++ show (_id p)
-    putStrLn $ "  PlayerUUID: " ++ show (_uuid p)
-    putStrLn $ "  Hand: " ++ show (_cards p)
-    putStrLn $ "  Pegs: " ++ show (_pegs p)
-    putStrLn ""
-
+showGameState :: GameState -> String
+showGameState gameState = unlines
+  [ "Mode: " ++ show (_mode gameState)
+  , "Deck: " ++ show (_deck gameState)
+  , "CardExchange: " ++ show (_cardExchange gameState)
+  , "Players: " ++ unlines ["  " ++ showPlayer p | p <- S.elems (_players gameState)]
+  ]
   where
-    players :: [Player]
-    players = S.elems $ _players gameState
+    showPlayer :: Player -> String
+    showPlayer p = unlines
+      [ "PlayerId: " ++ show (_id p)
+      , "PlayerUUID: " ++ show (_uuid p)
+      , "Hand: " ++ show (_cards p)
+      , "Pegs: " ++ show (_pegs p)
+      ]
 
 checkPlayerNumber :: Int -> GameMonad ()
 checkPlayerNumber n = do

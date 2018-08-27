@@ -1,41 +1,45 @@
-import           Test.Tasty         (defaultMain, testGroup)
-import           Test.Tasty.Hspec   (testSpec)
-
-import qualified Data.GameSpec
-import qualified GameSpec
-import qualified Server.APISpec
+import           Test.Tasty              (defaultMain, testGroup)
+import           Test.Tasty.Hspec        (testSpec, hspec)
 
 import           Network.HTTP.Client     (newManager)
 import           Network.HTTP.Client.TLS (tlsManagerSettings)
 
-import           Server.API         (withServer, mkConfig, Handle, cEnvironnment, hConfig)
-import           Server.Environment (Environment (Test))
-import           Servant.Client   (mkClientEnv, parseBaseUrl, ClientEnv)
-import Server.Types (port)
+import           Servant.Client          (ClientEnv, mkClientEnv, parseBaseUrl)
 
-runSpec :: ClientEnv -> IO ()
-runSpec clientEnv = do
+import qualified Data.GameSpec
+import qualified GameSpec
+import           Server.API              (Config, Handle, cEnvironnment, hConfig,
+                                          fetchConfig, withServer)
+import qualified Server.APISpec
+import           Server.Environment      (Environment (Test))
+import           Server.Types            (port)
+
+
+runSpec :: Handle -> ClientEnv -> IO ()
+runSpec handle clientEnv = do
   spec1 <- testSpec "Data.GameSpec" Data.GameSpec.spec
   spec2 <- testSpec "GameSpec" GameSpec.spec
-  spec3 <- testSpec "Server.APISpec" $ Server.APISpec.spec clientEnv
+  spec3 <- testSpec "Server.APISpec" $ Server.APISpec.spec handle clientEnv
 
+  hspec $ Server.APISpec.spec handle clientEnv
+
+  -- TODO: concurrency issue with Tasty and Hspec
+  -- Cannot add spec3 in there because concurrency is messed up
   defaultMain $
     testGroup "tests"
       [ spec1
       , spec2
-      , spec3
       ]
 
 main :: IO ()
 main = do
-  config <- mkConfig Test
-  withServer config $ \handle -> do
-    clientEnv <- mkTestClientEnv handle
-    runSpec clientEnv
+  config <- fetchConfig Test
+  withServer config $ \h -> do
+    clientEnv <- mkTestClientEnv config
+    runSpec h clientEnv
 
-
-mkTestClientEnv :: Handle -> IO ClientEnv
-mkTestClientEnv handle = do
+mkTestClientEnv :: Config -> IO ClientEnv
+mkTestClientEnv config = do
   mgr        <- newManager tlsManagerSettings
-  baseUrl    <- parseBaseUrl $ "http://localhost:" ++ show (port (cEnvironnment (hConfig handle)))
+  baseUrl    <- parseBaseUrl $ "http://localhost:" ++ show (port (cEnvironnment config))
   return $ mkClientEnv mgr baseUrl

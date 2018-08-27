@@ -3,5 +3,8 @@ module Server.Environment
   where
 
 
-data Environment = Prod | Dev | Test
+data Environment
+  = Prod
+  | Dev
+  | Test
   deriving (Eq, Show)

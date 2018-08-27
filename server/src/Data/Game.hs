@@ -108,13 +108,23 @@ data GameResult
 
 instance ToJSON GameResult where
   toJSON (NewPlayer uuid pid) = object
-    [ "uuid" .= uuid
+    [ "type" .= ("NewPlayer" :: T.Text)
+    , "uuid" .= uuid
     , "pid"  .= pid
     ]
-  toJSON Unit = toJSON ("OK" :: T.Text)
+  toJSON Unit = object
+    [ "type" .= ("Unit" :: T.Text) ]
 
+-- TODO:
 instance FromJSON GameResult where
-  parseJSON = withObject "GameResult" $ \o -> return Unit
+  parseJSON = withObject "GameResult" $ \o -> do
+    (resultType :: T.Text) <- o .: "type"
+    case resultType of
+      "NewPlayer" -> parseNewPlayer o
+      "Unit"      -> return Unit
+      _           -> fail "Error parsing GameResult"
+    where
+      parseNewPlayer o = NewPlayer <$> o .: "uuid" <*> o .: "pid"
 
 type PlayerUUID = UUID  -- ^ Type synonym for Player UUID
 
@@ -528,6 +538,7 @@ data FilteredGameState = FilteredGameState
   , _factions :: [PlayerAction]                  -- ^ Actions that can be performed
   , _fhistory :: [Action]                         -- ^ History of all Actions performed so far
   }
+  deriving (Eq, Show)
 
 instance ToJSON FilteredGameState where
   toJSON s = object
