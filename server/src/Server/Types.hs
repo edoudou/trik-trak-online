@@ -2,21 +2,25 @@
 
 module Server.Types
   ( Port
+  , port
+
   , Valid(KO, OK)
   , valid
   , invalid
   , eitherToValid
-  , port
+
   )
   where
 
 import           Data.Aeson
 
-import Server.Environment (Environment(..))
+import           Server.Environment (Environment (..))
 
 type Port = Int
 
-data Valid e a = KO e | OK a
+data Valid e a
+  = KO e
+  | OK a
   deriving (Eq, Show)
 
 valid :: a -> Valid e a

@@ -1,13 +1,11 @@
 module Data.GameSpec where
 
--- import           Control.Exception     (evaluate)
 import           Control.Monad    (forM_)
 import           Data.List        as L
 import           Data.Set         as S
 import           System.Random    (getStdGen)
 import           Test.Tasty.Hspec (Spec, SpecWith, anyException, before,
                                    describe, it, shouldBe, shouldThrow)
--- import           Test.Tasty.QuickCheck (property)
 
 import           Data.Game
 
