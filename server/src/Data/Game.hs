@@ -1,50 +1,51 @@
+{-# LANGUAGE DeriveAnyClass      #-}
+{-# LANGUAGE DeriveGeneric       #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Data.Game where
 
-import           Control.Monad.Random  (StdGen, MonadRandom, getRandom)
+import           Control.Monad.Random (MonadRandom, StdGen, getRandom)
 import           Data.Aeson
-import qualified Data.Aeson.Encoding   as AE
-import           Data.Foldable         (maximum)
-import           Data.Function         (on)
-import qualified Data.List             as L
-import qualified Data.Map              as M
-import           Data.Maybe            (isJust, fromMaybe, maybe)
-import           Data.Scientific       (toBoundedInteger)
-import qualified Data.Set              as S
-import qualified Data.Text             as T
-import           Data.UUID             (UUID)
-import qualified Data.Vector            as V
+import qualified Data.Aeson.Encoding  as AE
+import           Data.Aeson.Types
+import qualified Data.Char            as C
+import           Data.Foldable        (maximum)
+import           Data.Function        (on)
+import qualified Data.List            as L
+import qualified Data.Map             as M
+import           Data.Maybe           (fromMaybe, isJust, maybe)
+import           Data.Scientific      (toBoundedInteger)
+import qualified Data.Set             as S
+import qualified Data.Text            as T
+import           Data.UUID            (UUID)
+import qualified Data.Vector          as V
+import           GHC.Generics         (Generic)
 
+-- |Game `Mode` for a Trik Trak Game
 data Mode
-  = JoinWait       -- ^ Waiting for other players to join
-  | CardExchange   -- ^ Exchanging cards between teammates
-  | Winner Team    -- ^ End of the game with a winner team
-  | Play PlayerId  -- ^ Regular round play with PlayerId playing
-  deriving (Eq, Show)
+  = JoinWait                       -- ^ Waiting for other players to join
+  | CardExchange                   -- ^ Exchanging cards between teammates
+  | Winner { modeTeam :: Team }    -- ^ End of the game with a winner team
+  | Play { modePid :: PlayerId }   -- ^ Regular round play with PlayerId playing
+  deriving (Eq, Show, Generic)
 
 instance ToJSON Mode where
-  toJSON (Winner team) = object [ "type" .= ("Winner" :: T.Text), "team" .= team ]
-  toJSON (Play pid) = object [ "type" .= ("Play" :: T.Text), "pid" .= pid]
-  toJSON mode = object [ "type" .= show mode ]
+  toJSON = genericToJSON defaultOptions {
+    fieldLabelModifier = map C.toLower . drop 4 }
 
 instance FromJSON Mode where
-  parseJSON = withObject "Mode" $ \o -> do
-    modeType :: String <- o .: "type"
-    case modeType of
-      "JoinWait" -> return JoinWait
-      "CardExchange" -> return CardExchange
-      "Winner" -> Winner <$> o.: "team"
-      "Play" -> Play <$> o .: "pid"
+  parseJSON = genericParseJSON defaultOptions {
+    fieldLabelModifier = map C.toLower . drop 4 }
 
--- TODO: use a better type. (LogLevel, Text) for instance
+-- |Game Log type for logging in the `GameMonad` type
 type GameLog = [String]
 
+-- |Environment
 newtype GameEnvironment = GameEnvironment
   { teams :: (Team, Team)  -- ^ Player Teams
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 partner :: PlayerId -> PlayerId
 partner P1 = P3
@@ -60,7 +61,7 @@ playerTeam P4 = Team P2 P4
 
 nextTeam :: Team -> Team
 nextTeam (Team P1 P3) = Team P2 P4
-nextTeam _ = Team P1 P3
+nextTeam _            = Team P1 P3
 
 nextPlayer :: PlayerId -> PlayerId
 nextPlayer P1 = P2
@@ -71,34 +72,39 @@ nextPlayer P4 = P1
 defaultGameEnvironment :: GameEnvironment
 defaultGameEnvironment = GameEnvironment (Team P1 P3, Team P2 P4)
 
+-- |Error that can be thrown in a `GameMonad` action
 data GameError
-  = InvalidAction Action         -- ^ InvalidAction for given Action and Player
-  | JoinTooManyPlayers           -- ^ Too many players are already in the Game
-  | WrongNumberPlayers Int       -- ^ Wrong Number of players
-  | Unauthorized PlayerUUID      -- ^ Unauthorized UUID
-  | WrongPlayerTurn PlayerUUID   -- ^ Wrong player turn
-  | CardNotAvailabe PlayerUUID Card  -- ^ Card is not availabe for player
-  | PlayerNotFound PlayerUUID    -- ^ Player Not Found exception
-  | CardAlreadyExchanged Card PlayerUUID  -- ^ Card is already exchanged for PlayerUUID
-  deriving (Eq, Show)
+  = InvalidAction Action                  -- ^ InvalidAction for given Action and Player
+  | JoinTooManyPlayers                    -- ^ Too many players are already in the Game
+  | WrongNumberPlayers { errorNPlayers :: Int }                -- ^ Wrong Number of players
+  | Unauthorized { errorPid :: PlayerUUID }               -- ^ Unauthorized UUID
+  | WrongPlayerTurn { errorPid :: PlayerUUID }           -- ^ Wrong player turn
+  | CardNotAvailabe { errorPid :: PlayerUUID, errorCard :: Card }       -- ^ Card is not availabe for player
+  | PlayerNotFound { errorPid :: PlayerUUID }             -- ^ Player Not Found exception
+  | CardAlreadyExchanged {errorCard :: Card, errorPid :: PlayerUUID }  -- ^ Card is already exchanged for PlayerUUID
+  deriving (Eq, Show, Generic)
 
 instance ToJSON GameError where
-  toJSON (InvalidAction (PA p _)) = object
-    [ "type"     .= ("InvalidAction" :: T.Text)
-    , "player_id" .= _id p
-    ]
-  toJSON JoinTooManyPlayers = object
-    [ "type" .= ("JoinTooManyPlayers" :: T.Text)]
-  toJSON (Unauthorized uuid) = object
-    [ "type" .= ("Unauthorized for uuid: " ++ show uuid) ]
-  toJSON (WrongPlayerTurn uuid) = object
-    [ "type" .= ("WrongPlayerTurn for uuid: " ++ show uuid) ]
-  toJSON (CardNotAvailabe uuid card) = object
-    [ "type" .= ("CardNotAvailabe " ++ show card ++ " for player " ++ show uuid) ]
-  toJSON (PlayerNotFound uuid) = object
-    [ "type" .= ("PlayerNotFound for uuid: " ++ show uuid) ]
-  toJSON (CardAlreadyExchanged card uuid) = object
-    [ "type" .= ("CardAlreadyExchanged " ++ show card ++ " for player " ++ show uuid) ]
+  toJSON = genericToJSON defaultOptions {
+    fieldLabelModifier = camelTo2 '_' . drop 5 }
+
+-- instance ToJSON GameError where
+--   toJSON (InvalidAction (PA p _)) = object
+--     [ "type"     .= ("InvalidAction" :: T.Text)
+--     , "player_id" .= _id p
+--     ]
+--   toJSON JoinTooManyPlayers = object
+--     [ "type" .= ("JoinTooManyPlayers" :: T.Text)]
+--   toJSON (Unauthorized uuid) = object
+--     [ "type" .= ("Unauthorized for uuid: " ++ show uuid) ]
+--   toJSON (WrongPlayerTurn uuid) = object
+--     [ "type" .= ("WrongPlayerTurn for uuid: " ++ show uuid) ]
+--   toJSON (CardNotAvailabe uuid card) = object
+--     [ "type" .= ("CardNotAvailabe " ++ show card ++ " for player " ++ show uuid) ]
+--   toJSON (PlayerNotFound uuid) = object
+--     [ "type" .= ("PlayerNotFound for uuid: " ++ show uuid) ]
+--   toJSON (CardAlreadyExchanged card uuid) = object
+--     [ "type" .= ("CardAlreadyExchanged " ++ show card ++ " for player " ++ show uuid) ]
 
 -- TODO: add a FilteredGameState
 data GameResult
@@ -336,15 +342,15 @@ instance ToJSON Peg where
 
 onTarget :: Peg -> Bool
 onTarget (PegBoard _ _) = False
-onTarget _        = False
+onTarget _              = False
 
 onBoard :: Peg -> Bool
 onBoard (PegBoard _ _) = True
-onBoard _ = False
+onBoard _              = False
 
 pegMode :: Peg -> PegMode
-pegMode PegHome = Normal
-pegMode (PegTarget _) = Stake
+pegMode PegHome           = Normal
+pegMode (PegTarget _)     = Stake
 pegMode (PegBoard _ mode) = mode
 
 data Card
@@ -358,8 +364,8 @@ data Card
   | Eight
   | Nine
   | Ten
-  | Twelve
   | Switch
+  | Twelve
   deriving (Eq, Show, Ord)
 
 instance ToJSON Card where
@@ -381,10 +387,6 @@ instance FromJSON PlayerId where
     maybe (fail "Error parsing PlayerId") return $ do
       i   <- toBoundedInteger n
       intToPlayerId i
-
--- TODO
--- instance FromJSONKey PlayerId where
-
 
 data Team = Team PlayerId PlayerId
   deriving (Eq, Show, Ord)
@@ -448,23 +450,23 @@ cardToInt Switch = 11
 cardToInt Twelve = 12
 
 cardToMove :: Card -> Int
-cardToMove One = 1
-cardToMove Two = 2
-cardToMove Three = 3
-cardToMove Four = -4
-cardToMove Five = 5
-cardToMove Six = 6
-cardToMove Seven = 7
-cardToMove Eight = 8
-cardToMove Nine = 9
-cardToMove Ten = 10
+cardToMove One    = 1
+cardToMove Two    = 2
+cardToMove Three  = 3
+cardToMove Four   = -4
+cardToMove Five   = 5
+cardToMove Six    = 6
+cardToMove Seven  = 7
+cardToMove Eight  = 8
+cardToMove Nine   = 9
+cardToMove Ten    = 10
 cardToMove Switch = 0
 cardToMove Twelve = 12
 
 startCard :: Card -> Bool
 startCard One = True
 startCard Ten = True
-startCard _ = False
+startCard _   = False
 
 defaultDeck :: Deck
 defaultDeck =
@@ -493,14 +495,14 @@ mkNextPlayerId xs
     inc = (+1)
 
 data GameState = GameState
-  { _players :: S.Set Player      -- ^ Set of players in the game
+  { _players         :: S.Set Player      -- ^ Set of players in the game
   , _roundPlayerTurn :: PlayerId -- ^ Round Player Turn
-  , _deck    :: Deck              -- ^ Current deck of card
-  , _mode    :: Mode              -- ^ Mode of the Game
-  , _teams   :: (Team, Team)      -- ^ Teams of the game
+  , _deck            :: Deck              -- ^ Current deck of card
+  , _mode            :: Mode              -- ^ Mode of the Game
+  , _teams           :: (Team, Team)      -- ^ Teams of the game
   -- TODO: use a type to abstract over M.Map PlayerId Card
-  , _cardExchange :: M.Map PlayerId Card  -- ^ PlayerId exchanges Card
-  , _gen     :: StdGen              -- ^ StdGen
+  , _cardExchange    :: M.Map PlayerId Card  -- ^ PlayerId exchanges Card
+  , _gen             :: StdGen              -- ^ StdGen
   }
   deriving (Show)
 
@@ -531,10 +533,10 @@ instance ToJSON a => ToJSON (Visibility a) where
   toJSON (Hidden _)  = toJSON ("hidden" :: T.Text)
 
 data FilteredGameState = FilteredGameState
-  { _fmode  :: Mode                              -- ^ Game Mode
-  , _fteams :: (Team, Team)                      -- ^ Teams
-  , _fcards :: M.Map PlayerId [Visibility Card]  -- ^ Player's cards
-  , _fpegs  :: M.Map PlayerId [Peg]              -- ^ Player's pegs
+  { _fmode    :: Mode                              -- ^ Game Mode
+  , _fteams   :: (Team, Team)                      -- ^ Teams
+  , _fcards   :: M.Map PlayerId [Visibility Card]  -- ^ Player's cards
+  , _fpegs    :: M.Map PlayerId [Peg]              -- ^ Player's pegs
   , _factions :: [PlayerAction]                  -- ^ Actions that can be performed
   , _fhistory :: [Action]                         -- ^ History of all Actions performed so far
   }
