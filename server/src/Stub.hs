@@ -1,19 +1,17 @@
 module Stub where
 
-import qualified Data.Map  as M
-
 import           Data.Game
 
-filteredPegs :: M.Map PlayerId [Peg]
-filteredPegs = M.fromList
+filteredPegs :: [(PlayerId, [Peg])]
+filteredPegs =
   [ (P1, [PegHome, PegHome, PegTarget (TargetPosition 1), PegBoard (BoardPosition 1) Stake])
   , (P2, [PegHome, PegHome, PegHome, PegHome])
   , (P3, [PegHome, PegHome, PegHome, PegHome])
   , (P4, [PegHome, PegHome, PegHome, PegHome])
   ]
 
-filteredCards :: M.Map PlayerId [Visibility Card]
-filteredCards = M.fromList
+filteredCards :: [(PlayerId, [Visibility Card])]
+filteredCards =
   [ (P1, setVisible <$> [One, Two, One, Switch])
   , (P2, setHidden <$> [One, Two, One, Switch])
   , (P3, setHidden <$> [One, Two, One, Switch])
@@ -23,7 +21,7 @@ filteredCards = M.fromList
 actions :: [PlayerAction]
 actions = [QuitGame]
 
-history :: [Action]
+history :: [PlayerAction]
 history = []
 
 filteredGameState :: FilteredGameState

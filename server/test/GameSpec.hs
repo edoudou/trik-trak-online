@@ -5,7 +5,6 @@
 module GameSpec where
 
 import           Control.Monad    (forM, forM_, replicateM)
-import qualified Data.Map         as M
 import           Data.UUID.V4     (nextRandom)
 import           System.Random    (getStdGen)
 import           Test.Tasty.Hspec (Spec, before, beforeAll, describe, it,
@@ -73,11 +72,11 @@ spec =
             _                            -> fail "Error"
 
           it "has cards for P1" $ \case
-            Right FilteredGameState {..} -> M.keys _fcards `shouldContain` [P1]
+            Right FilteredGameState {..} -> fst <$> _fcards `shouldContain` [P1]
             _                            -> fail "Error"
 
           it "has pegs for P1" $ \case
-            Right FilteredGameState {..} -> M.keys _fpegs `shouldContain` [P1]
+            Right FilteredGameState {..} -> fst <$> _fpegs `shouldContain` [P1]
             _                            -> fail "Error"
 
       beforeAll (joinNPlayersAndGetStates 4) $
@@ -94,12 +93,12 @@ spec =
 
           it "players have cards" $ \case
             Right xs -> forM_ (snd <$> xs) $ \FilteredGameState {..} ->
-              M.keys _fcards `shouldMatchList`  [P1, P2, P3, P4]
+              fst <$> _fcards `shouldMatchList`  [P1, P2, P3, P4]
             _ -> fail "Error"
 
           it "players have pegs" $ \case
             Right xs -> forM_ (snd <$> xs) $ \FilteredGameState {..} ->
-              M.keys _fpegs `shouldMatchList`  [P1, P2, P3, P4]
+              fst <$> _fpegs `shouldMatchList`  [P1, P2, P3, P4]
             _ -> fail "Error"
 
 

@@ -3,12 +3,17 @@
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
+-- TODO: add export list
+-- TODO: move some types to Internal
+--        * Make it available for testing
+--        * Does not export some constructors
+-- TODO: add doc for each exported function
+
 module Data.Game where
 
 import           Control.Monad.Random (MonadRandom, StdGen, getRandom)
 import           Data.Aeson
 import qualified Data.Aeson.Encoding  as AE
-import           Data.Aeson.Types
 import qualified Data.Char            as C
 import           Data.Foldable        (maximum)
 import           Data.Function        (on)
@@ -88,56 +93,30 @@ instance ToJSON GameError where
   toJSON = genericToJSON defaultOptions {
     fieldLabelModifier = camelTo2 '_' . drop 5 }
 
--- instance ToJSON GameError where
---   toJSON (InvalidAction (PA p _)) = object
---     [ "type"     .= ("InvalidAction" :: T.Text)
---     , "player_id" .= _id p
---     ]
---   toJSON JoinTooManyPlayers = object
---     [ "type" .= ("JoinTooManyPlayers" :: T.Text)]
---   toJSON (Unauthorized uuid) = object
---     [ "type" .= ("Unauthorized for uuid: " ++ show uuid) ]
---   toJSON (WrongPlayerTurn uuid) = object
---     [ "type" .= ("WrongPlayerTurn for uuid: " ++ show uuid) ]
---   toJSON (CardNotAvailabe uuid card) = object
---     [ "type" .= ("CardNotAvailabe " ++ show card ++ " for player " ++ show uuid) ]
---   toJSON (PlayerNotFound uuid) = object
---     [ "type" .= ("PlayerNotFound for uuid: " ++ show uuid) ]
---   toJSON (CardAlreadyExchanged card uuid) = object
---     [ "type" .= ("CardAlreadyExchanged " ++ show card ++ " for player " ++ show uuid) ]
-
--- TODO: add a FilteredGameState
 data GameResult
-  = NewPlayer PlayerUUID PlayerId
-  | Unit
-  deriving (Eq, Show)
+  = NewPlayer  -- ^ NewPlayer has been created
+    { gameResultUuid :: PlayerUUID
+    , gameResultPid :: PlayerId
+    }
+  | Unit       -- ^ Success but nothing to return
+  deriving (Eq, Show, Generic)
 
 instance ToJSON GameResult where
-  toJSON (NewPlayer uuid pid) = object
-    [ "type" .= ("NewPlayer" :: T.Text)
-    , "uuid" .= uuid
-    , "pid"  .= pid
-    ]
-  toJSON Unit = object
-    [ "type" .= ("Unit" :: T.Text) ]
+  toJSON = genericToJSON defaultOptions {
+    fieldLabelModifier = camelTo2 '_' . drop 10
+  }
 
--- TODO:
 instance FromJSON GameResult where
-  parseJSON = withObject "GameResult" $ \o -> do
-    (resultType :: T.Text) <- o .: "type"
-    case resultType of
-      "NewPlayer" -> parseNewPlayer o
-      "Unit"      -> return Unit
-      _           -> fail "Error parsing GameResult"
-    where
-      parseNewPlayer o = NewPlayer <$> o .: "uuid" <*> o .: "pid"
+  parseJSON = genericParseJSON defaultOptions {
+    fieldLabelModifier = camelTo2 '_' . drop 10
+  }
 
-type PlayerUUID = UUID  -- ^ Type synonym for Player UUID
+type PlayerUUID = UUID
 
 data Action
   = PA Player PlayerAction
   | NPA NoPlayerAction
-  deriving (Eq, Show)
+  deriving (Eq, Show, Generic)
 
 instance ToJSON Action where
   toJSON (PA player action) = object
@@ -146,43 +125,32 @@ instance ToJSON Action where
     ]
 
 data PlayerAction
-  = Exchange Card           -- ^ Exchange Card to PlayerId
-  | Move Card Peg Position  -- ^ Move Peg with Card to new Position
-  | Discard Card            -- ^ Discard Card
-  | SwitchPegs PlayerId Peg Peg   -- ^ Switch two pegs inclluding Player Id
+  = Exchange { pACard :: Card }           -- ^ Exchange Card to PlayerId
+  | Move  -- ^ Move Peg with Card to new Position
+    { pACard :: Card
+    , pAPeg :: Peg
+    , pAPosition :: Position
+    }
+  | Discard  -- ^ Discard Card
+    { pACard :: Card }
+  | SwitchPegs -- ^ Switch two pegs inclluding Player Id
+    { pAPid :: PlayerId
+    , pAFrom :: Peg
+    , pATo :: Peg
+    }
   | QuitGame                -- ^ Quit the game
-  deriving (Eq, Show)
+  deriving (Eq, Show, Generic)
 
 -- TODO: finish ToJSON
--- TODO: activate Warnings for incomplete pattern matching
 instance ToJSON PlayerAction where
-  toJSON (Exchange c) = object
-    [ "type" .= ("Exchange" :: T.Text)
-    , "card" .= c
-    ]
-  toJSON (Move c peg pos) = object
-    [ "type"      .= ("Move" :: T.Text)
-    , "card"      .= c
-    , "peg"       .= peg
-    , "position"  .= pos
-    ]
+  toJSON = genericToJSON defaultOptions {
+      fieldLabelModifier = map C.toLower . drop 2
+    }
 
 instance FromJSON PlayerAction where
-  parseJSON = withObject "PlayerAction" $ \o -> do
-    actionType :: String <- o .: "type"
-    case actionType of
-      "Exchange"   -> parseExchange o
-      "Move"       -> parseMove o
-      "Discard"    -> parseDiscard o
-      "SwitchPegs" -> parseSwitchPegs o
-      "QuitGame"   -> return QuitGame
-      _            -> fail "Error Parsing PlayerAction"
-
-    where
-      parseExchange   o = Exchange <$> o .: "card"
-      parseDiscard    o = Discard <$> o .: "card"
-      parseSwitchPegs o = SwitchPegs <$> o .: "pid" <*> o .: "from" <*> o .: "to"
-      parseMove       o = Move <$> o .: "card" <*> o .: "peg" <*> o .: "position"
+  parseJSON = genericParseJSON defaultOptions {
+      fieldLabelModifier = map C.toLower . drop 2
+    }
 
 data NoPlayerAction
   = JoinGame      -- ^ Join the Game
@@ -191,6 +159,7 @@ data NoPlayerAction
 instance ToJSON NoPlayerAction where
   toJSON JoinGame = toJSON $ show JoinGame
 
+-- |Representing a Player in the Game
 data Player = Player
   { _uuid  :: PlayerUUID -- ^ Player uuid
   , _id    :: PlayerId   -- ^ Player id
@@ -213,6 +182,7 @@ mkPlayer pid hand pegs = do
   uuid <- getRandom
   return $ Player uuid pid hand pegs
 
+-- |Mode of a Peg
 data PegMode
   = Normal  -- ^ Normal Mode
   | Stake   -- ^ Stake Mode
@@ -231,34 +201,45 @@ instance FromJSON PegMode where
       "Stake"  -> return Stake
       _        -> fail "Error parsing PegMode"
 
+-- |Position on Board or Target
 data Position
-  = BP BoardPosition
-  | TP TargetPosition
-  deriving (Eq, Show, Ord)
-
-instance FromJSON Position where
-  parseJSON = withObject "Position" $ \o -> do
-    positionType :: String <- o .: "type"
-    position <- o .: "position"
-    case positionType of
-      "Board" ->
-        case boardPosition position of
-          Nothing -> fail "Error Parsing BoardPosition"
-          Just bp -> return (BP bp)
-      "Target" ->
-        case targetPosition position of
-          Nothing -> fail "Error Parsing TargetPosition"
-          Just tp -> return (TP tp)
+  = BP { pBPosition :: BoardPosition }
+  | TP { pTPosition :: TargetPosition }
+  deriving (Eq, Show, Ord, Generic)
 
 instance ToJSON Position where
-  toJSON (BP bp) = object
-    [ "type" .= ("Board" :: T.Text)
-    , "position" .= bp
-    ]
-  toJSON (TP tp) = object
-    [ "type" .= ("Target" :: T.Text)
-    , "position" .= tp
-    ]
+  toJSON = genericToJSON defaultOptions {
+      fieldLabelModifier = map C.toLower . drop 2
+    }
+
+instance FromJSON Position where
+  parseJSON = genericParseJSON defaultOptions {
+      fieldLabelModifier = map C.toLower . drop 2
+    }
+
+-- instance FromJSON Position where
+--   parseJSON = withObject "Position" $ \o -> do
+--     positionType :: String <- o .: "type"
+--     position <- o .: "position"
+--     case positionType of
+--       "Board" ->
+--         case boardPosition position of
+--           Nothing -> fail "Error Parsing BoardPosition"
+--           Just bp -> return (BP bp)
+--       "Target" ->
+--         case targetPosition position of
+--           Nothing -> fail "Error Parsing TargetPosition"
+--           Just tp -> return (TP tp)
+
+-- instance ToJSON Position where
+--   toJSON (BP bp) = object
+--     [ "type" .= ("Board" :: T.Text)
+--     , "position" .= bp
+--     ]
+--   toJSON (TP tp) = object
+--     [ "type" .= ("Target" :: T.Text)
+--     , "position" .= tp
+--     ]
 
 newtype BoardPosition
   = BoardPosition Int  -- ^ Position on the Board
@@ -309,36 +290,24 @@ targetPosition n
   | otherwise = Just $ TargetPosition n
 
 data Peg
-  = PegBoard BoardPosition PegMode   -- ^ On the board at position with mode
-  | PegTarget TargetPosition         -- ^ On the target at position
-  | PegHome                          -- ^ Home
-  deriving (Eq, Show)
-
-instance FromJSON Peg where
-  parseJSON = withObject "Peg" $ \o -> do
-    location :: String <- o .: "location"
-    case location of
-      "Home"   -> return PegHome
-      "Target" -> parsePegTarget o
-      "Board"  -> parsePegBoard o
-      _        -> fail "Error parsing Peg"
-    where
-      parsePegTarget o = PegTarget <$> o .: "position"
-      parsePegBoard o = PegBoard <$> o .: "position" <*> o .: "mode"
+  = PegBoard   -- ^ On the board at position with mode
+    { pegBoardPosition :: BoardPosition
+    , pegPegMode       :: PegMode
+    }
+  | PegTarget  -- ^ On the target at position
+    { pegTargetPosition :: TargetPosition }
+  | PegHome    -- ^ Home
+  deriving (Eq, Show, Generic)
 
 instance ToJSON Peg where
-  toJSON PegHome = object
-    [ "location" .= T.pack "Home"
-    ]
-  toJSON (PegTarget (TargetPosition x)) = object
-    [ "location" .= T.pack "Target"
-    , "position" .= x
-    ]
-  toJSON (PegBoard (BoardPosition x) mode) = object
-    [ "location" .= T.pack "Board"
-    , "position" .= x
-    , "stake" .= (mode == Stake :: Bool)
-    ]
+  toJSON = genericToJSON defaultOptions {
+    fieldLabelModifier = camelTo2 '_' . drop 3
+  }
+
+instance FromJSON Peg where
+  parseJSON = genericParseJSON defaultOptions {
+    fieldLabelModifier = camelTo2 '_' . drop 3
+  }
 
 onTarget :: Peg -> Bool
 onTarget (PegBoard _ _) = False
@@ -517,56 +486,49 @@ emptyGameState g = GameState
   , _gen          = g
   }
 
+-- TODO: Do not export constructors
+-- TODO: Use a newType around Maybe
 data Visibility a
-  = Visible a      -- ^ Visible Element
-  | Hidden a       -- ^ Hidden Element
-  deriving (Eq, Show, Ord)
+  = Visible { visibilityValue :: a }    -- ^ Visible Element
+  | Hidden       -- ^ Hidden Element
+  deriving (Eq, Show, Ord, Generic)
 
 setVisible :: a -> Visibility a
 setVisible = Visible
 
 setHidden :: a -> Visibility a
-setHidden = Hidden
+setHidden = const Hidden
 
 instance ToJSON a => ToJSON (Visibility a) where
-  toJSON (Visible x) = toJSON x
-  toJSON (Hidden _)  = toJSON ("hidden" :: T.Text)
+  toJSON = genericToJSON defaultOptions {
+      fieldLabelModifier = camelTo2 '_' . drop 10
+    }
 
+instance FromJSON a => FromJSON (Visibility a) where
+  parseJSON = genericParseJSON defaultOptions {
+      fieldLabelModifier = camelTo2 '_' . drop 10
+    }
+
+-- |State of the game seen by a given player
 data FilteredGameState = FilteredGameState
-  { _fmode    :: Mode                              -- ^ Game Mode
-  , _fteams   :: (Team, Team)                      -- ^ Teams
-  , _fcards   :: M.Map PlayerId [Visibility Card]  -- ^ Player's cards
-  , _fpegs    :: M.Map PlayerId [Peg]              -- ^ Player's pegs
-  , _factions :: [PlayerAction]                  -- ^ Actions that can be performed
-  , _fhistory :: [Action]                         -- ^ History of all Actions performed so far
+  { _fmode    :: Mode                             -- ^ Game Mode
+  , _fteams   :: (Team, Team)                     -- ^ Teams
+  , _fcards   :: [(PlayerId, [Visibility Card])]  -- ^ Player's cards
+  , _fpegs    :: [(PlayerId, [Peg])]              -- ^ Player's peg
+  , _factions :: [PlayerAction]                   -- ^ Actions that can be performed
+  , _fhistory :: [PlayerAction]                   -- ^ History of all Actions performed so far
   }
-  deriving (Eq, Show)
+  deriving (Eq, Show, Generic)
 
 instance ToJSON FilteredGameState where
-  toJSON s = object
-    [ "mode"   .= _fmode s
-    , "teams"  .= _fteams s
-    , "cards"  .= _fcards s
-    , "pegs"   .= _fpegs s
-    , "actions".= _factions s
-    , "history".= _fhistory s
-    ]
+  toJSON = genericToJSON defaultOptions {
+      fieldLabelModifier = map C.toLower . drop 2
+    }
 
 instance FromJSON FilteredGameState where
-  parseJSON = withObject "FilteredGameState" $ \o -> do
-    mode <- o .: "mode"
-    teams <- o .: "teams"
-    -- cards <- o .: "cards"
-    actions <- o .: "actions"
-    -- history <- o .: "history"
-    return $ FilteredGameState mode teams M.empty M.empty actions []
-    -- FilteredGameState <$>
-    --   o .: "mode" <*>
-    --   o .: "teams" <*>
-    --   o .: "cards" <*>
-    --   o .: "pegs" <*>
-    --   o .: "actions" <*>
-    --   o .: "history"
+  parseJSON = genericParseJSON defaultOptions {
+      fieldLabelModifier = map C.toLower . drop 2
+    }
 
 findPlayer :: GameState -> PlayerUUID -> Maybe Player
 findPlayer s uuid = L.find ((== uuid) . _uuid) players
@@ -607,14 +569,12 @@ filterGameState player gameState = FilteredGameState
   , _fhistory = []
   }
   where
-    allPegs :: S.Set Player -> M.Map PlayerId [Peg]
-    allPegs players = M.fromList
-      $ map (\q -> (_id q, _pegs q))
+    allPegs :: S.Set Player -> [(PlayerId, [Peg])]
+    allPegs players = map (\q -> (_id q, _pegs q))
       $ S.elems players
 
-    filterCard :: S.Set Player -> Player -> M.Map PlayerId [Visibility Card]
-    filterCard players p = M.fromList
-      $ map (\q -> (_id q, map (\c -> if _id p == _id q then setVisible c else setHidden c) (_cards p)))
+    filterCard :: S.Set Player -> Player -> [(PlayerId, [Visibility Card])]
+    filterCard players p = map (\q -> (_id q, map (\c -> if _id p == _id q then setVisible c else setHidden c) (_cards p)))
       $ S.elems players
       -- TODO: use lens to simplify
 

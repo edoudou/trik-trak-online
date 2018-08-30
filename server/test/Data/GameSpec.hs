@@ -4,10 +4,10 @@
 
 module Data.GameSpec where
 
-import           Control.Monad             (forM_)
-import           Data.List                 as L
+import           Control.Monad             (forM, forM_)
+import qualified Data.List                 as L
 import           Data.Maybe                (fromMaybe)
-import           Data.Set                  as S
+import qualified Data.Set                  as S
 import           System.Random             (getStdGen, mkStdGen, random)
 
 import           Data.Aeson                (decode, encode)
@@ -116,10 +116,66 @@ instance Arbitrary PlayerAction where
       , QuitGame
       ]
 
+instance Arbitrary GameResult where
+  arbitrary = do
+    uuid <- arbitrary
+    pid <- arbitrary
+    elements
+      [ NewPlayer uuid pid
+      , Unit
+      ]
+
+instance Arbitrary FilteredGameState where
+  arbitrary = do
+    let teams = (Team P1 P3, Team P2 P4)
+    let pids = [P1, P2, P3, P4]
+    mode <- arbitrary
+    pid <- arbitrary
+    nCards <- choose (0, 4)
+    cards <- forM pids $ \id -> do
+      cards' <- vectorOf nCards arbitrary
+      return (id, if pid == id then setVisible <$> cards' else setHidden <$> cards')
+    pegs <- forM pids $ \id -> do
+      pegs' <- vectorOf nCards arbitrary
+      return (id, pegs')
+    nActions <- arbitrary
+    nHistory <- arbitrary
+    actions <- vectorOf nActions arbitrary
+    history <- vectorOf nHistory arbitrary
+    return $ FilteredGameState mode teams cards pegs actions history
+
 spec :: Spec
 spec =
   describe "Data.Game" $ do
     describe "JSON encoding/decoding" $ do
+      describe "Data.Game.FilteredGameState" $
+        it "encodes/decodes FilteredGameState properly" $
+          property $ \(s:: FilteredGameState) -> decode (encode s) == Just s
+
+      describe "Data.Game.Card" $
+        it "encodes/decodes Card properly" $
+          property $ \(card :: Card) -> decode (encode card) == Just card
+
+      describe "Data.Game.Peg" $
+        it "encodes/decodes Peg properly" $
+          property $ \(peg :: Peg) -> decode (encode peg) == Just peg
+
+      describe "Data.Game.Position" $
+        it "encodes/decodes Position properly" $
+          property $ \(pos :: Position) -> decode (encode pos) == Just pos
+
+      describe "Data.Game.PegMode" $
+        it "encodes/decodes PegMode properly" $
+          property $ \(pegMode :: PegMode) -> decode (encode pegMode) `shouldBe` Just pegMode
+
+      describe "Data.Game.PlayerAction" $
+        it "encodes/decodes PlayerAction" $
+          property $ \(action :: PlayerAction) -> decode (encode action) == Just action
+
+      describe "Data.Game.GameResult" $
+        it "encodes/decodes GameResult" $
+          property $ \(r :: GameResult) -> decode (encode r) == Just r
+
 
       describe "Data.Game.GameError" $
         it "encodes GameErrors to a string longer than 5 characters" $
