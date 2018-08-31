@@ -6,7 +6,7 @@ import           Control.Monad         (guard, when)
 import           Control.Monad.Except  (throwError)
 import           Control.Monad.State   (get, gets, modify')
 import           Control.Monad.Writer  (tell)
-import           Data.List             as L
+import qualified Data.List             as L
 import qualified Data.Map              as M
 import           Data.Maybe            (maybeToList)
 import qualified Data.Set              as S

@@ -5,15 +5,18 @@
 module Data.GameSpec where
 
 import           Control.Monad             (forM, forM_)
+import qualified Data.Char                 as C
 import qualified Data.List                 as L
 import           Data.Maybe                (fromMaybe)
+import           Data.Monoid               ((<>))
 import qualified Data.Set                  as S
 import           System.Random             (getStdGen, mkStdGen, random)
 
-import           Data.Aeson                (decode, encode)
+import           Data.Aeson                (FromJSON, ToJSON, decode, encode)
 import qualified Data.ByteString.Lazy      as BL
 import qualified Data.ByteString.Lazy.UTF8 as T
 import           Test.QuickCheck           hiding (Discard)
+import           Test.QuickCheck.Instances
 import           Test.Tasty.Hspec          (Spec, SpecWith, anyException,
                                             before, describe, it, shouldBe,
                                             shouldThrow)
@@ -27,11 +30,12 @@ instance Arbitrary PlayerId where
 instance Arbitrary Card where
   arbitrary = elements [One, Two, Three, Four, Five, Six, Seven, Eight, Nine, Ten,  Switch, Twelve]
 
-instance Arbitrary PlayerUUID where
-  arbitrary = do
-    stdGen <- mkStdGen <$> arbitrary
-    let (uuid, _ ) = random stdGen
-    return uuid
+-- Comes from quickcheck-instances package
+-- instance Arbitrary PlayerUUID where
+--   arbitrary = do
+--     stdGen <- mkStdGen <$> arbitrary
+--     let (uuid, _ ) = random stdGen
+--     return uuid
 
 instance Arbitrary Team where
   arbitrary = elements [Team P1 P3, Team P2 P4]
@@ -144,60 +148,81 @@ instance Arbitrary FilteredGameState where
     history <- vectorOf nHistory arbitrary
     return $ FilteredGameState mode teams cards pegs actions history
 
+encodeDecodeIdentityProp :: (ToJSON a, FromJSON a, Eq a) => a -> Bool
+encodeDecodeIdentityProp x = decode (encode x) == Just x
+
+outputAlphabetProp :: (ToJSON a) => a -> Bool
+outputAlphabetProp x =
+    used `S.isSubsetOf` allowed
+  where
+    used = S.fromList . BL.unpack $ encode x
+    allowed = S.fromList . map (fromIntegral . C.ord) $ ['A'..'Z'] <> ['a'..'z'] <> ['0'..'9'] <> ['[', ']','{','}',',',':', '_', '"', '\\', '-']
+
 spec :: Spec
 spec =
   describe "Data.Game" $ do
     describe "JSON encoding/decoding" $ do
-      describe "Data.Game.FilteredGameState" $
+      describe "Data.Game.FilteredGameState" $ do
         it "encodes/decodes FilteredGameState properly" $
-          property $ \(s:: FilteredGameState) -> decode (encode s) == Just s
+          property (encodeDecodeIdentityProp :: FilteredGameState -> Bool)
+        it "encodes FilteredGameState with correct alphabet" $
+          property (outputAlphabetProp :: FilteredGameState -> Bool)
 
-      describe "Data.Game.Card" $
+      describe "Data.Game.Card" $ do
         it "encodes/decodes Card properly" $
-          property $ \(card :: Card) -> decode (encode card) == Just card
+          property (encodeDecodeIdentityProp :: Card -> Bool)
+        it "encodes Card with correct alphabet" $
+          property (outputAlphabetProp :: Card -> Bool)
 
-      describe "Data.Game.Peg" $
+      describe "Data.Game.Peg" $ do
         it "encodes/decodes Peg properly" $
-          property $ \(peg :: Peg) -> decode (encode peg) == Just peg
+          property (encodeDecodeIdentityProp :: Peg -> Bool)
+        it "encodes Peg with correct alphabet" $
+          property (outputAlphabetProp :: Peg -> Bool)
 
-      describe "Data.Game.Position" $
+      describe "Data.Game.Position" $ do
         it "encodes/decodes Position properly" $
-          property $ \(pos :: Position) -> decode (encode pos) == Just pos
+          property (encodeDecodeIdentityProp :: Position -> Bool)
+        it "encodes Position with correct alphabet" $
+          property (outputAlphabetProp :: Position -> Bool)
 
-      describe "Data.Game.PegMode" $
+      describe "Data.Game.PegMode" $ do
         it "encodes/decodes PegMode properly" $
-          property $ \(pegMode :: PegMode) -> decode (encode pegMode) `shouldBe` Just pegMode
+          property (encodeDecodeIdentityProp :: PegMode -> Bool)
+        it "encodes PegMode with correct alphabet" $
+          property (outputAlphabetProp :: PegMode -> Bool)
 
-      describe "Data.Game.PlayerAction" $
+      describe "Data.Game.PlayerAction" $ do
         it "encodes/decodes PlayerAction" $
-          property $ \(action :: PlayerAction) -> decode (encode action) == Just action
+          property (encodeDecodeIdentityProp :: PlayerAction -> Bool)
+        it "encodes PlayerAction with correct alphabet" $
+          property (outputAlphabetProp :: PlayerAction -> Bool)
 
-      describe "Data.Game.GameResult" $
+      describe "Data.Game.GameResult" $ do
         it "encodes/decodes GameResult" $
-          property $ \(r :: GameResult) -> decode (encode r) == Just r
+          property (encodeDecodeIdentityProp :: GameResult -> Bool)
+        it "encodes PlayerAction with correct alphabet" $
+          property (outputAlphabetProp :: GameResult -> Bool)
 
-
-      describe "Data.Game.GameError" $
+      describe "Data.Game.GameError" $ do
         it "encodes GameErrors to a string longer than 5 characters" $
           property $ \(e :: GameError) -> BL.length (encode e) >= 5
+        it "encodes GameError with correct alphabet" $
+          property (outputAlphabetProp :: GameError -> Bool)
 
       describe "Data.Game.PlayerId" $ do
         it "encodes PlayerId properly" $ property $
           \pid -> encode pid == T.fromString (show $ playerIdToInt pid)
-        it "encodes and decodes PlayerId" $
-          property $ \(pid :: PlayerId) -> decode (encode pid) == Just pid
+        it "encodes/decodes PlayerId properly" $
+          property (encodeDecodeIdentityProp :: PlayerId -> Bool)
+        it "encodes PlayerId with correct alphabet" $
+          property (outputAlphabetProp :: PlayerId -> Bool)
 
       describe "Data.Game.Mode" $ do
-        it "encodes JoinWait properly" $
-          encode JoinWait `shouldBe` "{\"tag\":\"JoinWait\"}"
-        it "encodes CardExchange properly" $
-          encode CardExchange `shouldBe` "{\"tag\":\"CardExchange\"}"
-        it "encodes Play properly" $
-          encode (Play P1) `shouldBe` "{\"tag\":\"Play\",\"pid\":1}"
-        it "encodes Winner properly" $
-          encode (Winner (Team P1 P2)) `shouldBe` "{\"tag\":\"Winner\",\"team\":[1,2]}"
-        it "encodes and decodes game `Mode` properly" $
-          property $ \(mode :: Mode) -> decode (encode mode) `shouldBe` Just mode
+        it "encodes/decodes Mode properly" $
+          property (encodeDecodeIdentityProp :: Mode -> Bool)
+        it "encodes Mode with correct alphabet" $
+          property (outputAlphabetProp :: Mode -> Bool)
 
     describe "Data.Game.dealCards" $ do
 

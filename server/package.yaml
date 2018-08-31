@@ -77,3 +77,4 @@ tests:
     - tasty-quickcheck
     - tasty-hspec
     - QuickCheck
+    - quickcheck-instances
