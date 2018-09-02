@@ -3,13 +3,91 @@
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
--- TODO: add export list
 -- TODO: move some types to Internal
 --        * Make it available for testing
 --        * Does not export some constructors
 -- TODO: add doc for each exported function
 
-module Data.Game where
+module Data.Game
+  ( Mode (..)
+  , GameLog
+  , GameError (..)
+
+  , GameEnvironment (..)
+  , defaultGameEnvironment
+
+  , GameResult (..)
+  , partner
+  , playerTeam
+  , nextTeam
+  , nextPlayer
+
+  , PlayerUUID
+  , PlayerId (..)
+  , Player (..)
+  , Team (..)
+
+  , Action (..)
+  , PlayerAction (..)
+  , NoPlayerAction (..)
+  , emptyHand
+  , defaultPegs
+  , mkPlayer
+
+  , Position (..)
+
+  , BoardPosition (..)
+  , boardPosition
+  , startPosition
+  , endPosition
+  , runBoardPosition
+
+  , TargetPosition (..)
+  , targetPosition
+
+  , Peg (..)
+  , PegMode (..)
+  , onTarget
+  , onBoard
+  , pegMode
+
+  , Card (..)
+  , Deck
+  , Hand
+  , playerIdToInt
+  , intToPlayerId
+  , intToCard
+  , cardToInt
+  , cardToMove
+  , startCard
+  , defaultDeck
+  , emptyDeck
+  , mkNextPlayerId
+
+  , Visibility (..)
+  , setVisible
+  , setHidden
+
+  , FilteredGameState (..)
+  , filterGameState
+
+  , GameState (..)
+  , emptyGameState
+  , isOver
+  , winner
+  , playerWon
+
+  , findPlayer
+  , findPlayerByPlayerId
+  , getPlayerUUIDs
+  , playerUUIDToPlayerId
+  , playerIdToPlayerUUID
+  , playerUUIDMap
+  , playerIdMap
+
+  , dealCards
+  )
+  where
 
 import           Control.Monad.Random (MonadRandom, StdGen, getRandom)
 import           Data.Aeson
@@ -124,6 +202,7 @@ instance ToJSON Action where
     , "action" .= action
     ]
 
+-- TODO: rename pA to pa
 data PlayerAction
   = Exchange { pACard :: !Card }           -- ^ Exchange Card to PlayerId
   | Move  -- ^ Move Peg with Card to new Position
@@ -439,15 +518,15 @@ mkNextPlayerId xs
     inc :: Int -> Int
     inc = (+1)
 
+-- TODO: add prefix `gs`
 data GameState = GameState
-  { _players         :: !(S.Set Player)      -- ^ Set of players in the game
-  , _roundPlayerTurn :: !PlayerId -- ^ Round Player Turn
-  , _deck            :: !Deck              -- ^ Current deck of card
-  , _mode            :: !Mode              -- ^ Mode of the Game
-  , _teams           :: !(Team, Team)      -- ^ Teams of the game
-  -- TODO: use a type to abstract over M.Map PlayerId Card
+  { _players         :: !(S.Set Player)         -- ^ Set of players in the game
+  , _roundPlayerTurn :: !PlayerId               -- ^ Round Player Turn
+  , _deck            :: !Deck                   -- ^ Current deck of card
+  , _mode            :: !Mode                   -- ^ Mode of the Game
+  , _teams           :: !(Team, Team)           -- ^ Teams of the game
   , _cardExchange    :: !(M.Map PlayerId Card)  -- ^ PlayerId exchanges Card
-  , _gen             :: !StdGen              -- ^ StdGen
+  , _gen             :: !StdGen                 -- ^ StdGen
   }
   deriving (Show)
 
@@ -463,10 +542,9 @@ emptyGameState g = GameState
   }
 
 -- TODO: Do not export constructors
--- TODO: Use a newType around Maybe
 data Visibility a
   = Visible { visibilityValue :: !a }    -- ^ Visible Element
-  | Hidden       -- ^ Hidden Element
+  | Hidden                               -- ^ Hidden Element
   deriving (Eq, Show, Ord, Generic)
 
 setVisible :: a -> Visibility a
@@ -485,7 +563,8 @@ instance FromJSON a => FromJSON (Visibility a) where
       fieldLabelModifier = camelTo2 '_' . drop 10
     }
 
--- |State of the game seen by a given player
+-- TODO: prefix with `fgs`
+-- | State of the game seen by a given player
 data FilteredGameState = FilteredGameState
   { _fmode    :: !Mode                             -- ^ Game Mode
   , _fteams   :: !(Team, Team)                     -- ^ Teams
@@ -517,7 +596,6 @@ findPlayerByPlayerId s pid = L.find ((== pid) . _id) players
   where
     players :: [Player]
     players = S.elems (_players s)
-
 
 getPlayerUUIDs :: GameState -> S.Set PlayerUUID
 getPlayerUUIDs = S.map _uuid . _players
