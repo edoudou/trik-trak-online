@@ -16,8 +16,8 @@ import           Test.Tasty.Hspec      (Spec, before, beforeAll, describe, it,
                                         shouldMatchList, shouldNotContain)
 
 import           Data.Game
-import           Game                  (exchangeCard, getState, join, mkDeck,
-                                        quitGame)
+import           Game                  (exchangeCard, getState, initGame, join,
+                                        mkDeck, quitGame)
 import           GameMonad             (GameMonad, evalGameMonad, execGameMonad)
 import           SpecUtils             (allPlayerIds)
 
@@ -37,6 +37,7 @@ spec =
         let quitAction :: GameMonad Player
             quitAction = do
               joinPlayers
+              initGame
               exchangeRandomCards
               quitRandomPlayerGame
 
@@ -150,6 +151,8 @@ joinNPlayersAndGetStates n = do
     gameAction :: GameMonad [(PlayerId, FilteredGameState)]
     gameAction = do
       players <- replicateM n join
+      -- Game is ready to be played
+      initGame
       forM players $ \(uuid, pid) -> do
         filteredState <- getState uuid
         return (pid, filteredState)
