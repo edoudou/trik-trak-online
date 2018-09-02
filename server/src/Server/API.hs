@@ -98,7 +98,7 @@ withPlayerTurn player action = do
   b <- checkPlayerTurn player
   if b
   then action
-  else throwError $ WrongPlayerTurn (_uuid player)
+  else throwError $ WrongPlayerTurn (_puuid player)
 
 gameErrorToServantError :: GameError -> ServantErr
 gameErrorToServantError gameError@(DG.Unauthorized _)  =

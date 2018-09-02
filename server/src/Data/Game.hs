@@ -1,3 +1,4 @@
+{-# LANGUAGE TemplateHaskell     #-}
 {-# LANGUAGE DeriveGeneric       #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -88,9 +89,6 @@ module Data.Game
   )
   where
 
-import           Control.Monad.Random (MonadRandom, StdGen, getRandom)
-import           Data.Aeson
-import qualified Data.Aeson.Encoding  as AE
 import qualified Data.Char            as C
 import           Data.Foldable        (maximum)
 import           Data.Function        (on)
@@ -101,8 +99,13 @@ import           Data.Scientific      (toBoundedInteger)
 import qualified Data.Set             as S
 import qualified Data.Text            as T
 import           Data.UUID            (UUID)
-import qualified Data.Vector          as V
 import           GHC.Generics         (Generic)
+
+import           Control.Lens         (makeLenses)
+import           Control.Monad.Random (MonadRandom, StdGen, getRandom)
+import           Data.Aeson
+import qualified Data.Aeson.Encoding  as AE
+import qualified Data.Vector          as V
 
 -- |Game `Mode` for a Trik Trak Game
 data Mode
@@ -125,7 +128,7 @@ type GameLog = [String]
 
 -- |Environment
 data GameEnvironment = GameEnvironment
-  { _geTeams :: !(Team, Team)  -- ^ Player Teams
+  { _geTeams    :: !(Team, Team)  -- ^ Player Teams
   , _geNPlayers :: !Int        -- ^ N Players to join before the game can start
   }
   deriving (Show, Eq)
@@ -179,7 +182,7 @@ instance ToJSON GameError where
 data GameResult
   = NewPlayer  -- ^ NewPlayer has been created
     { gameResultUuid :: !PlayerUUID
-    , gameResultPid :: !PlayerId
+    , gameResultPid  :: !PlayerId
     }
   | Unit       -- ^ Success but nothing to return
   deriving (Eq, Show, Generic)
@@ -203,7 +206,7 @@ data Action
 
 instance ToJSON Action where
   toJSON (PA player action) = object
-    [ "pid"    .= _id player
+    [ "pid"    .= _pid player
     , "action" .= action
     ]
 
@@ -211,16 +214,16 @@ instance ToJSON Action where
 data PlayerAction
   = Exchange { pACard :: !Card }           -- ^ Exchange Card to PlayerId
   | Move  -- ^ Move Peg with Card to new Position
-    { pACard :: !Card
-    , pAPeg :: !Peg
+    { pACard     :: !Card
+    , pAPeg      :: !Peg
     , pAPosition :: !Position
     }
   | Discard  -- ^ Discard Card
     { pACard :: !Card }
   | SwitchPegs -- ^ Switch two pegs inclluding Player Id
-    { pAPid :: !PlayerId
+    { pAPid  :: !PlayerId
     , pAFrom :: !Peg
-    , pATo :: !Peg
+    , pATo   :: !Peg
     }
   | QuitGame                -- ^ Quit the game
   deriving (Eq, Show, Generic)
@@ -245,15 +248,15 @@ instance ToJSON NoPlayerAction where
 
 -- |Representing a Player in the Game
 data Player = Player
-  { _uuid  :: !PlayerUUID -- ^ Player uuid
-  , _id    :: !PlayerId   -- ^ Player id
-  , _cards :: !Hand       -- ^ Hand of cards
-  , _pegs  :: ![Peg]      -- ^ Pegs
+  { _puuid  :: !PlayerUUID -- ^ Player uuid
+  , _pid    :: !PlayerId   -- ^ Player id
+  , _pcards :: !Hand       -- ^ Hand of cards
+  , _ppegs  :: ![Peg]      -- ^ Pegs
   }
   deriving (Eq, Show)
 
 instance Ord Player where
-  compare = compare `on` _id
+  compare = compare `on` _pid
 
 emptyHand :: Hand
 emptyHand = []
@@ -518,32 +521,31 @@ mkNextPlayerId xs
       $ maximum
       $ fmap playerIdToInt
       $ S.toList
-      $ S.map _id xs
+      $ S.map _pid xs
   where
     inc :: Int -> Int
     inc = (+1)
 
--- TODO: add prefix `gs`
 data GameState = GameState
-  { _players         :: !(S.Set Player)         -- ^ Set of players in the game
-  , _roundPlayerTurn :: !PlayerId               -- ^ Round Player Turn
-  , _deck            :: !Deck                   -- ^ Current deck of card
-  , _mode            :: !Mode                   -- ^ Mode of the Game
-  , _teams           :: !(Team, Team)           -- ^ Teams of the game
-  , _cardExchange    :: !(M.Map PlayerId Card)  -- ^ PlayerId exchanges Card
-  , _gen             :: !StdGen                 -- ^ StdGen
+  { _gstPlayers         :: !(S.Set Player)         -- ^ Set of players in the game
+  , _gstRoundPlayerTurn :: !PlayerId               -- ^ Round Player Turn
+  , _gstDeck            :: !Deck                   -- ^ Current deck of card
+  , _gstMode            :: !Mode                   -- ^ Mode of the Game
+  , _gstCardExchange    :: !(M.Map PlayerId Card)  -- ^ PlayerId exchanges Card
+  , _gstGen             :: !StdGen                 -- ^ StdGen
   }
   deriving (Show)
 
+makeLenses ''GameState
+
 emptyGameState :: StdGen -> GameState
 emptyGameState g = GameState
-  { _mode            = JoinWait
-  , _players         = S.empty
-  , _roundPlayerTurn = P1
-  , _deck            = emptyDeck
-  , _teams           = (Team P1 P3, Team P2 P4)
-  , _cardExchange    = M.empty
-  , _gen             = g
+  { _gstMode            = JoinWait
+  , _gstPlayers         = S.empty
+  , _gstRoundPlayerTurn = P1
+  , _gstDeck            = emptyDeck
+  , _gstCardExchange    = M.empty
+  , _gstGen             = g
   }
 
 -- TODO: Do not export constructors
@@ -571,14 +573,16 @@ instance FromJSON a => FromJSON (Visibility a) where
 -- TODO: prefix with `fgs`
 -- | State of the game seen by a given player
 data FilteredGameState = FilteredGameState
-  { _fmode    :: !Mode                             -- ^ Game Mode
-  , _fteams   :: !(Team, Team)                     -- ^ Teams
-  , _fcards   :: ![(PlayerId, [Visibility Card])]  -- ^ Player's cards
-  , _fpegs    :: ![(PlayerId, [Peg])]              -- ^ Player's peg
-  , _factions :: ![PlayerAction]                   -- ^ Actions that can be performed
-  , _fhistory :: ![PlayerAction]                   -- ^ History of all Actions performed so far
+  { _fgstMode    :: !Mode                             -- ^ Game Mode
+  , _fgstTeams   :: !(Team, Team)                     -- ^ Teams
+  , _fgstCards   :: ![(PlayerId, [Visibility Card])]  -- ^ Player's cards
+  , _fgstPegs    :: ![(PlayerId, [Peg])]              -- ^ Player's peg
+  , _fgstActions :: ![PlayerAction]                   -- ^ Actions that can be performed
+  , _fgstHistory :: ![PlayerAction]                   -- ^ History of all Actions performed so far
   }
   deriving (Eq, Show, Generic)
+
+makeLenses ''FilteredGameState
 
 instance ToJSON FilteredGameState where
   toJSON = genericToJSON defaultOptions {
@@ -591,19 +595,19 @@ instance FromJSON FilteredGameState where
     }
 
 findPlayer :: GameState -> PlayerUUID -> Maybe Player
-findPlayer s uuid = L.find ((== uuid) . _uuid) players
+findPlayer s uuid = L.find ((== uuid) . _puuid) players
   where
     players :: [Player]
-    players = S.elems (_players s)
+    players = S.elems (_gstPlayers s)
 
 findPlayerByPlayerId :: GameState -> PlayerId -> Maybe Player
-findPlayerByPlayerId s pid = L.find ((== pid) . _id) players
+findPlayerByPlayerId s pid = L.find ((== pid) . _pid) players
   where
     players :: [Player]
-    players = S.elems (_players s)
+    players = S.elems (_gstPlayers s)
 
 getPlayerUUIDs :: GameState -> S.Set PlayerUUID
-getPlayerUUIDs = S.map _uuid . _players
+getPlayerUUIDs = S.map _puuid . _gstPlayers
 
 playerUUIDToPlayerId :: GameState -> PlayerUUID -> Maybe PlayerId
 playerUUIDToPlayerId gameState uuid =
@@ -616,36 +620,36 @@ playerIdToPlayerUUID gameState pid =
 playerUUIDMap :: GameState -> M.Map PlayerUUID PlayerId
 playerUUIDMap gameState = M.fromList
       $ S.elems
-      $ S.map (\p -> (_uuid p, _id p))
-      $ _players gameState
+      $ S.map (\p -> (_puuid p, _pid p))
+      $ _gstPlayers gameState
 
 playerIdMap :: GameState -> M.Map PlayerId PlayerUUID
 playerIdMap gameState = M.fromList
       $ S.elems
-      $ S.map (\p -> (_id p, _uuid p))
-      $ _players gameState
+      $ S.map (\p -> (_pid p, _puuid p))
+      $ _gstPlayers gameState
 
-filterGameState :: Player -> GameState -> FilteredGameState
-filterGameState player gameState = FilteredGameState
-  { _fmode  = _mode gameState
-  , _fteams = _teams gameState
-  , _fcards = filterCard (_players gameState) player
-  , _fpegs  = allPegs (_players gameState)
-  , _factions = []
-  , _fhistory = []
+filterGameState :: Player -> GameState -> GameEnvironment -> FilteredGameState
+filterGameState player gameState gameEnv = FilteredGameState
+  { _fgstMode    = _gstMode gameState
+  , _fgstTeams   = _geTeams gameEnv
+  , _fgstCards   = filterCard (_gstPlayers gameState) player
+  , _fgstPegs    = allPegs (_gstPlayers gameState)
+  , _fgstActions = []
+  , _fgstHistory = []
   }
   where
     allPegs :: S.Set Player -> [(PlayerId, [Peg])]
-    allPegs players = map (\q -> (_id q, _pegs q))
+    allPegs players = map (\q -> (_pid q, _ppegs q))
       $ S.elems players
 
     filterCard :: S.Set Player -> Player -> [(PlayerId, [Visibility Card])]
-    filterCard players p = map (\q -> (_id q, map (\c -> if _id p == _id q then setVisible c else setHidden c) (_cards p)))
+    filterCard players p = map (\q -> (_pid q, map (\c -> if _pid p == _pid q then setVisible c else setHidden c) (_pcards p)))
       $ S.elems players
       -- TODO: use lens to simplify
 
-isOver :: GameState -> Bool
-isOver gameState = isJust $ winner gameState
+isOver :: GameEnvironment -> GameState -> Bool
+isOver gameEnv gameState = isJust $ winner gameEnv gameState
 
 teamWon :: M.Map PlayerId Bool -> Team -> Bool
 teamWon playerIdVictory (Team p1 p2) =
@@ -654,8 +658,8 @@ teamWon playerIdVictory (Team p1 p2) =
     victoryP2 <- M.lookup p2 playerIdVictory
     return $ victoryP1 && victoryP2
 
-winner :: GameState -> Maybe Team
-winner gameState =
+winner :: GameEnvironment -> GameState -> Maybe Team
+winner gameEnv gameState =
   case ( teamWon playerIdVictory team1
        , teamWon playerIdVictory team2
        ) of
@@ -664,16 +668,16 @@ winner gameState =
     _             -> Nothing
 
   where
-    (team1, team2) = _teams gameState
+    (team1, team2) = _geTeams gameEnv
 
     playerIdVictory :: M.Map PlayerId Bool
     playerIdVictory = M.fromList
-      $ map (\player -> (_id player, playerWon player))
+      $ map (\player -> (_pid player, playerWon player))
       $ S.elems
-      $ _players gameState
+      $ _gstPlayers gameState
 
 playerWon :: Player -> Bool
-playerWon = all onTarget . _pegs
+playerWon = all onTarget . _ppegs
 
 dealCards :: Deck -> Maybe (Deck, [Hand])
 dealCards deck =

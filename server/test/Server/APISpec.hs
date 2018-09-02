@@ -23,7 +23,7 @@ import           Data.Game                 (FilteredGameState (..),
                                             GameResult (..), GameState,
                                             Mode (..),
                                             PlayerId (..),
-                                            emptyGameState, _fmode, _players)
+                                            emptyGameState, _fgstMode, _gstPlayers)
 import qualified Server.API
 import           Server.Client             (clientHealth, clientJoin,
                                             clientState)
@@ -88,7 +88,7 @@ stateSpec handle clientEnv = describe "/state" $ do
             r2 <- runClientM (clientState uuid) clientEnv
             case r2 of
               Left e                       -> fail (show e)
-              Right FilteredGameState {..} -> _fmode `shouldBe` JoinWait
+              Right FilteredGameState {..} -> _fgstMode `shouldBe` JoinWait
           _ -> fail "fail"
 
   afterAll_ (resetDB handle) $
@@ -99,7 +99,7 @@ stateSpec handle clientEnv = describe "/state" $ do
           Right (NewPlayer uuid _) -> do
             r <- runClientM (clientState uuid) clientEnv
             case r of
-              Right FilteredGameState {..} -> _fmode `shouldBe` CardExchange
+              Right FilteredGameState {..} -> _fgstMode `shouldBe` CardExchange
               _                            -> fail "Error"
           _ -> fail "Error"
       it "contains 4 players" $ assertNPlayers db 4
@@ -128,7 +128,7 @@ assertAllPlayerIds xs =
 assertNPlayers :: TVar GameState -> Int -> Expectation
 assertNPlayers tvar k = do
   gameState <- readTVarIO tvar
-  S.size (_players gameState) `shouldBe` k
+  S.size (_gstPlayers gameState) `shouldBe` k
 
 resetDB :: Server.API.Handle -> IO ()
 resetDB handle = void

@@ -26,10 +26,10 @@ history = []
 
 filteredGameState :: FilteredGameState
 filteredGameState = FilteredGameState
-  { _fteams = (Team P1 P3, Team P2 P4)
-  , _fcards = filteredCards
-  , _fpegs = filteredPegs
-  , _fmode = Play P1
-  , _factions = actions
-  , _fhistory = history
+  { _fgstTeams   = (Team P1 P3, Team P2 P4)
+  , _fgstCards   = filteredCards
+  , _fgstPegs    = filteredPegs
+  , _fgstMode    = Play P1
+  , _fgstActions = actions
+  , _fgstHistory = history
   }

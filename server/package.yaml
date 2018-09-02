@@ -26,6 +26,7 @@ dependencies:
 - containers
 - fast-logger
 - http-types
+- lens
 - MonadRandom
 - mtl
 - random

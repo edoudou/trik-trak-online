@@ -237,10 +237,10 @@ spec =
       describe "Data.Game.emptyGameState" $ do
 
         it "The game is not over" $ \s ->
-          isOver s `shouldBe` False
+          isOver defaultGameEnvironment s `shouldBe` False
 
         it "There is no winner" $ \s ->
-          winner s `shouldBe` Nothing
+          winner defaultGameEnvironment s `shouldBe` Nothing
 
         it "No player has won" $ \s ->
-          L.or (playerWon <$> S.elems (_players s)) `shouldBe` False
+          L.or (playerWon <$> S.elems (_gstPlayers s)) `shouldBe` False

@@ -43,7 +43,7 @@ spec =
         it "Game Mode is `Winner`" $ \(gameEnv, gameState) ->
           case evalGameMonad gameEnv gameState quitAction of
             Right (_, GameState {..}) ->
-              case _mode of
+              case _gstMode of
                 Winner _ -> True `shouldBe` True
                 _        -> fail "Error: wrong game mode"
             Left _ -> fail "Error"
@@ -51,9 +51,9 @@ spec =
         it "the player leaving the game is not among the winners" $ \(gameEnv, gameState) ->
           case evalGameMonad gameEnv gameState quitAction of
             Right (Player {..}, GameState {..}) ->
-              case _mode of
+              case _gstMode of
                 Winner (Team pid1 pid2) ->
-                  [pid1, pid2] `shouldNotContain` [_id]
+                  [pid1, pid2] `shouldNotContain` [_pid]
                 _ -> fail "Error: wrong game mode"
             Left _ -> fail "Error"
 
@@ -96,15 +96,15 @@ spec =
             _                            -> fail "Error"
 
           it "Game Mode is JoinWait" $ \case
-            Right FilteredGameState {..} -> _fmode `shouldBe` JoinWait
+            Right FilteredGameState {..} -> _fgstMode `shouldBe` JoinWait
             _                            -> fail "Error"
 
           it "has cards for P1" $ \case
-            Right FilteredGameState {..} -> fst <$> _fcards `shouldContain` [P1]
+            Right FilteredGameState {..} -> fst <$> _fgstCards `shouldContain` [P1]
             _                            -> fail "Error"
 
           it "has pegs for P1" $ \case
-            Right FilteredGameState {..} -> fst <$> _fpegs `shouldContain` [P1]
+            Right FilteredGameState {..} -> fst <$> _fgstPegs `shouldContain` [P1]
             _                            -> fail "Error"
 
       beforeAll (joinNPlayersAndGetStates 4) $
@@ -116,17 +116,17 @@ spec =
 
           it "Game Mode is CardExchange" $ \case
             Right xs -> forM_ (snd <$> xs) $ \FilteredGameState {..} ->
-              _fmode `shouldBe` CardExchange
+              _fgstMode `shouldBe` CardExchange
             _ -> fail "Error"
 
           it "players have cards" $ \case
             Right xs -> forM_ (snd <$> xs) $ \FilteredGameState {..} ->
-              fst <$> _fcards `shouldMatchList` allPlayerIds
+              fst <$> _fgstCards `shouldMatchList` allPlayerIds
             _ -> fail "Error"
 
           it "players have pegs" $ \case
             Right xs -> forM_ (snd <$> xs) $ \FilteredGameState {..} ->
-              fst <$> _fpegs `shouldMatchList` allPlayerIds
+              fst <$> _fgstPegs `shouldMatchList` allPlayerIds
             _ -> fail "Error"
 
 
@@ -181,14 +181,14 @@ joinPlayers = void $ replicateM 4 join
 exchangeRandomCards :: GameMonad ()
 exchangeRandomCards = do
   gameState <- get
-  forM_ (_players gameState) $ \player -> do
-    card <- head <$> shuffleM (_cards player)
+  forM_ (_gstPlayers gameState) $ \player -> do
+    card <- head <$> shuffleM (_pcards player)
     exchangeCard player card
   return ()
 
 quitRandomPlayerGame :: GameMonad Player
 quitRandomPlayerGame = do
   gameState <- get
-  player <- head <$> shuffleM (S.elems (_players gameState))
+  player <- head <$> shuffleM (S.elems (_gstPlayers gameState))
   quitGame player
   return player
