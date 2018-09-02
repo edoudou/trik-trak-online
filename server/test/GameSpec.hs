@@ -4,19 +4,23 @@
 
 module GameSpec where
 
-import           Control.Monad    (forM, forM_, replicateM)
-import           Data.UUID.V4     (nextRandom)
-import           System.Random    (getStdGen)
-import           Test.Tasty.Hspec (Spec, before, beforeAll, describe, it,
-                                   shouldBe, shouldContain, shouldMatchList)
+import           Control.Monad        (forM, forM_, replicateM, void)
+import           Control.Monad.State  (get)
+import           Control.Monad.Writer (tell)
+import qualified Data.Set as S
+import           System.Random        (getStdGen)
 
-import           Data.Game        (FilteredGameState (..), GameEnvironment,
-                                   GameError (..), GameResult (..), GameState,
-                                   Mode (..), PlayerId (..),
-                                   defaultGameEnvironment, emptyGameState)
-import           Game             (getState, join, mkDeck)
-import           GameMonad        (GameMonad, runGameMonad)
-import           SpecUtils        (assertAllPlayerIds)
+import           Data.UUID.V4         (nextRandom)
+import           Test.Tasty.Hspec     (Spec, before, beforeAll, describe, it,
+                                       shouldBe, shouldContain, shouldNotContain, shouldMatchList,
+                                       shouldNotBe)
+import           System.Random.Shuffle (shuffleM)
+
+import           Data.Game
+import           Game                 (quitGame, exchangeCard, getState, join, mkDeck)
+import           GameMonad            (GameMonad, evalGameMonad, execGameMonad,
+                                       execGameMonadState)
+import           SpecUtils            (assertAllPlayerIds)
 
 spec :: Spec
 spec =
@@ -25,10 +29,34 @@ spec =
     before setupGameEnvState $
       describe "Game.mkDeck" $
         it "contains 48 cards" $ \(gameEnv, gameState) ->
-          let (result, _) = runGameMonad gameEnv gameState mkDeck
-          in case result of
-               Right (deck, _) -> length deck `shouldBe` 48
-               Left e          -> fail $ "Error: " ++ show e
+          case evalGameMonad gameEnv gameState mkDeck of
+            Right (deck, _) -> length deck `shouldBe` 48
+            Left e          -> fail $ "Error: " ++ show e
+
+    before setupGameEnvState $
+      describe "Game.quitGame" $ do
+        let quitAction :: GameMonad Player
+            quitAction = do
+              joinPlayers
+              exchangeRandomCards
+              quitRandomPlayerGame
+
+        it "Game Mode is `Winner`" $ \(gameEnv, gameState) ->
+          case evalGameMonad gameEnv gameState quitAction of
+            Right (player, GameState {..}) ->
+              case _mode of
+                Winner _ -> True `shouldBe` True
+                _        -> fail "Error: wrong game mode"
+            Left e -> fail "Error"
+
+        it "the player leaving the game is not among the winners" $ \(gameEnv, gameState) ->
+          case evalGameMonad gameEnv gameState quitAction of
+            Right (Player {..}, GameState {..}) ->
+              case _mode of
+                Winner (Team pid1 pid2) ->
+                  [pid1, pid2] `shouldNotContain` [_id]
+                _ -> fail "Error: wrong game mode"
+            Left e -> fail "Error"
 
     describe "Game.join" $ do
 
@@ -52,13 +80,14 @@ spec =
 
     describe "Game.getState" $ do
 
-      describe "0 player" $
-        it "is Unauthorized" $ do
-          (gameEnv, gameState) <- setupGameEnvState
-          uuid <- nextRandom
-          case withGameResult gameEnv gameState (getState uuid) of
-            Left e  -> e `shouldBe` Unauthorized uuid
-            Right _ -> fail "Error"
+      before setupGameEnvState $
+        describe "0 player" $
+          it "is Unauthorized" $
+            \(gameEnv, gameState) -> do
+              uuid <- nextRandom
+              case execGameMonad gameEnv gameState (getState uuid) of
+                Left e  -> e `shouldBe` Unauthorized uuid
+                Right _ -> fail "Error"
 
       beforeAll joinAndGetState $
         describe "1 player" $ do
@@ -102,20 +131,22 @@ spec =
             _ -> fail "Error"
 
 
+-- TODO: refactor to only run in the GameMonad
 joinAndGetState :: IO (Either GameError FilteredGameState)
 joinAndGetState = do
   (gameEnv, gameState) <- setupGameEnvState
-  return $ withGameResult gameEnv gameState gameAction
+  return $ execGameMonad gameEnv gameState gameAction
   where
     gameAction :: GameMonad FilteredGameState
     gameAction = do
       NewPlayer uuid pid <- join
       getState uuid
 
+-- TODO: refactor to only run in the GameMonad
 joinNPlayersAndGetStates :: Int -> IO (Either GameError [(PlayerId, FilteredGameState)])
 joinNPlayersAndGetStates n = do
   (gameEnv, gameState) <- setupGameEnvState
-  return $ withGameResult gameEnv gameState gameAction
+  return $ execGameMonad gameEnv gameState gameAction
   where
     gameAction :: GameMonad [(PlayerId, FilteredGameState)]
     gameAction = do
@@ -131,13 +162,33 @@ setupGameEnvState = do
   g <- getStdGen
   return (defaultGameEnvironment, emptyGameState g)
 
-withGameResult :: GameEnvironment -> GameState -> GameMonad a -> Either GameError a
-withGameResult gameEnv gameState action = fst <$> fst (runGameMonad gameEnv gameState action)
-
-withGameState :: GameEnvironment -> GameState -> GameMonad a -> Either GameError GameState
-withGameState gameEnv gameState action = snd <$> fst (runGameMonad gameEnv gameState action)
-
+-- TODO: refactor to only run in the GameMonad
 joinNPlayers :: Int -> IO (Either GameError [GameResult])
 joinNPlayers n = do
   (gameEnv, gameState) <- setupGameEnvState
-  return $ withGameResult gameEnv gameState $ replicateM n join
+  return $ execGameMonad gameEnv gameState $ replicateM n join
+
+exchangeCardForPlayerId :: PlayerId -> GameMonad ()
+exchangeCardForPlayerId pid = do
+  gameState <- get
+  case findPlayerByPlayerId gameState pid of
+    Nothing     -> return ()
+    Just player -> return ()
+
+joinPlayers :: GameMonad ()
+joinPlayers = void $ replicateM 4 join
+
+exchangeRandomCards :: GameMonad ()
+exchangeRandomCards = do
+  gameState <- get
+  forM_ (_players gameState) $ \player -> do
+    card <- head <$> shuffleM (_cards player)
+    exchangeCard player card
+  return ()
+
+quitRandomPlayerGame :: GameMonad Player
+quitRandomPlayerGame = do
+  gameState <- get
+  player <- head <$> shuffleM (S.elems (_players gameState))
+  quitGame player
+  return player

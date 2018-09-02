@@ -38,7 +38,7 @@ handle (PA player (Exchange card)) = do
       when canExchange $ do
         gameState <- get
         tell ["Exchanging cards among players with the following cards: " ++ show (_cardExchange gameState)]
-        exchangeCards
+        performCardExchange
       return Unit
 handle act@(PA player action@(Move card peg position)) = do
   gameState <- get
@@ -52,8 +52,23 @@ handle act@(PA player action@(Move card peg position)) = do
     -- movePeg player peg position >> useCard card >> return Unit
     return Unit
 
-handle (PA p QuitGame)                  = quitGame p
+handle (PA p QuitGame)                  = quitGame p >> return Unit
 handle _                                = undefined
+
+exchangeCard :: Player -> Card -> GameMonad ()
+exchangeCard player card = do
+  mCardExchanged <- hasAlreadyExchangedCard player
+  case mCardExchanged of
+    Just c' -> throwError $ CardAlreadyExchanged c' (_uuid player)
+    Nothing -> do
+      tell ["Giving Card " ++ show card ++ " to Player " ++ show (_id player)]
+      giveCard player card
+      canExchange <- canExchangeCards
+      when canExchange $ do
+        gameState <- get
+        tell ["Exchanging cards among players with the following cards: " ++ show (_cardExchange gameState)]
+        performCardExchange
+      return ()
 
 movePeg :: Player -> Peg -> Position -> GameMonad ()
 movePeg player peg position = return ()
@@ -63,10 +78,10 @@ useCard :: Player -> Card -> GameMonad ()
 useCard player card = return ()
 
 -- TODO: add state for players who left
-quitGame :: Player -> GameMonad GameResult
+quitGame :: Player -> GameMonad ()
 quitGame player = do
   modify' (\s -> s { _mode = Winner winnerTeam })
-  return Unit
+  return ()
 
   where
     winnerTeam :: Team
@@ -86,7 +101,7 @@ cardActions :: S.Set Player -> PlayerId -> [PlayerAction]
 cardActions players pid =
   case playerActions of
     [] -> discards
-    _  ->  playerActions
+    _  -> playerActions
 
   where
     cards :: [Card]
@@ -209,8 +224,8 @@ canExchangeCards = do
   gameState <- get
   return $ length (M.keys (_cardExchange gameState)) == 4
 
-exchangeCards :: GameMonad ()
-exchangeCards = do
+performCardExchange :: GameMonad ()
+performCardExchange = do
   gameState <- get
   -- TODO: Use lenses to clean up
   modify' (\s -> s
