@@ -7,7 +7,7 @@ module Game where
 import           Control.Monad         (guard, when)
 import           Control.Monad.Except  (throwError)
 import           Control.Monad.Reader  (ask)
-import           Control.Monad.State   (get, gets, modify')
+import           Control.Monad.State   (get, gets)
 import           Control.Monad.Writer  (tell)
 import           Data.Function         (on)
 import qualified Data.List             as L
@@ -16,12 +16,13 @@ import           Data.Maybe            (maybeToList)
 import qualified Data.Set              as S
 import           Data.String           (unlines)
 
+import           Control.Lens          (mapped, over, set, use, view, (%=),
+                                        (.=))
 import           System.Random.Shuffle (shuffleM)
-import Control.Lens (over)
 
 
-import           Data.Game
-import           GameMonad (GameMonad)
+import           Data.Game             hiding (pid)
+import           GameMonad             (GameMonad)
 
 
 handle :: Action -> GameMonad GameResult
@@ -29,7 +30,7 @@ handle (NPA JoinGame) = do
   (uuid, pid)       <- join
   isGameReadyToPlay <- readyToPlay
   when isGameReadyToPlay initGame
-  return (NewPlayer uuid pid)
+  return $ NewPlayer uuid pid
 
 handle (PA player playerAction@(Exchange card)) =
   withValidPlayerAction player playerAction $
@@ -61,20 +62,22 @@ handle (PA player QuitGame) =
 
 performSwitchPegs :: (Player, Peg) -> (PlayerId, Peg) -> GameMonad ()
 performSwitchPegs (player1, peg1) (pid2, peg2) = do
-  gameState <- get
+  gameState@GameState {..} <- get
+
   case findPlayerByPlayerId gameState pid2 of
     Nothing ->
       throwError $ PlayerIdNotFound pid2
 
     Just player2 ->
       let (newPlayer1, newPlayer2) = switchPegs (player1, peg1) (player2, peg2)
-      in modify' (\s -> s { _gstPlayers = S.insert newPlayer1 (S.insert newPlayer2 (S.delete player2 (S.delete player1 (_gstPlayers s))))})
-      -- TODO: use lens to simplify
+      in do
+        gstPlayers %= (S.delete player1 . S.delete player2)
+        gstPlayers %= (S.insert newPlayer1 . S.insert newPlayer2)
 
 switchPegs :: (Player, Peg) -> (Player, Peg) -> (Player, Player)
 switchPegs (player1, peg1) (player2, peg2) =
-  ( player1 { _ppegs = peg2 : L.delete peg1 (_ppegs player1)}
-  , player2 { _ppegs = peg1 : L.delete peg2 (_ppegs player2)}
+  ( over ppegs (\pegs -> peg2 : L.delete peg1 pegs) player1
+  , over ppegs (\pegs -> peg1 : L.delete peg2 pegs) player2
   )
 
 isValidPlayerAction :: GameState -> Player -> PlayerAction -> Bool
@@ -107,10 +110,10 @@ move player peg position =
       movePeg player peg position
 
 -- Assumption: valid player action
--- TODO: use lens to simplify nested record updates
 movePeg :: Player -> Peg -> Position -> GameMonad ()
-movePeg player@Player {..} peg position =
-  modify' (\s -> s { _gstPlayers = S.insert newPlayer (S.delete player (_gstPlayers s))})
+movePeg player@Player {..} peg position = do
+  gstPlayers %= S.delete player
+  gstPlayers %= S.insert (over ppegs (\pegs -> newPeg : L.delete peg pegs) player)
 
   where
     newPeg :: Peg
@@ -119,25 +122,17 @@ movePeg player@Player {..} peg position =
         BP bp -> PegBoard bp (if bp == startBoardPosition _pid then Stake else Normal)
         TP tp -> PegTarget tp
 
-    newPegs :: [Peg]
-    newPegs = newPeg : L.delete peg _ppegs
-
-    newPlayer :: Player
-    newPlayer = player { _ppegs = newPegs }
-
-
--- TODO: use lens to simplify
 -- Assumption: valid player action
 eatPeg :: BoardPosition -> GameMonad Bool
 eatPeg bp = do
-  gameState <- get
-  modify' (\s -> s { _gstPlayers = S.fromList (newPlayers (S.elems (_gstPlayers s)))})
-  gameState' <- get
-  return $ on (/=) _gstPlayers gameState gameState'
+  s <- get
+  gstPlayers %= \players -> S.fromList $ newPlayers $ S.elems players
+  s' <- get
+  return $ on (/=) _gstPlayers s s'
 
   where
     eatPegForPlayer :: Player -> Player
-    eatPegForPlayer p = p { _ppegs = eatPeg' <$> _ppegs p }
+    eatPegForPlayer = over (ppegs . mapped) eatPeg'
 
     eatPeg' :: Peg -> Peg
     eatPeg' peg@(PegBoard bp' _) = if bp == bp' then PegHome else peg
@@ -165,21 +160,19 @@ exchangeCard player card = do
   canExchangeAmongPlayers <- canExchangeCardsAmongPlayers
   when canExchangeAmongPlayers performCardExchange
 
--- TODO: use lens to simplify
 -- TODO: rename to discardCard?
 useCard :: Player -> Card -> GameMonad ()
 useCard player card =
-  modify' (\s -> s { _gstPlayers = S.fromList (newPlayer : L.delete player (S.elems (_gstPlayers s)))})
+  gstPlayers %= \players -> S.fromList $ newPlayer : L.delete player (S.elems players)
 
   where
     newPlayer :: Player
-    newPlayer = player { _pcards = L.delete card (_pcards player) }
+    newPlayer = over pcards (L.delete card) player
 
 -- TODO: add state for players who left
 quitGame :: Player -> GameMonad ()
 quitGame Player {..} =
-  modify' (\s -> s { _gstMode = Winner winnerTeam })
-
+  gstMode .= Winner winnerTeam
   where
     winnerTeam :: Team
     winnerTeam = nextTeam $ playerTeam _pid
@@ -318,21 +311,18 @@ hasAlreadyExchangedCard Player {..} = gets $ M.lookup _pid . _gstCardExchange
 
 canExchangeCardsAmongPlayers :: GameMonad Bool
 canExchangeCardsAmongPlayers = do
-  GameState       {..} <- get
-  GameEnvironment {..} <- ask
-  return $ length (M.keys _gstCardExchange) == _geNPlayers
+  cardExchange <- use gstCardExchange
+  nPlayers     <- view geNPlayers
+  return $ length (M.keys cardExchange) == nPlayers
 
 performCardExchange :: GameMonad ()
 performCardExchange = do
   GameState {..} <- get
   tell ["Exchanging cards among players with the following cards: " ++ show _gstCardExchange]
-  -- TODO: Use lenses to clean up
-  modify' (\s -> s
-            { _gstPlayers         = exchangeCards' _gstPlayers _gstCardExchange
-            , _gstCardExchange    = M.empty
-            , _gstMode            = Play (nextPlayer _gstRoundPlayerTurn)
-            , _gstRoundPlayerTurn = nextPlayer _gstRoundPlayerTurn
-            })
+  gstPlayers         %= flip exchangeCards' _gstCardExchange
+  gstCardExchange    .= M.empty
+  gstMode            .= Play (nextPlayer _gstRoundPlayerTurn)
+  gstRoundPlayerTurn %= nextPlayer
 
   where
     exchangeCards' :: S.Set Player -> M.Map PlayerId Card -> S.Set Player
@@ -344,7 +334,6 @@ performCardExchange = do
 
 giveCard :: Player -> Card -> GameMonad ()
 giveCard player card = do
-
   GameState {..} <- get
 
   case L.find (== card) (_pcards player) of
@@ -352,20 +341,14 @@ giveCard player card = do
       throwError $ CardNotAvailabe (_puuid player) card
 
     Just _ ->
-      let cardExchange' = M.insert (_pid player) card _gstCardExchange
-          hand' = L.delete card (_pcards player)
-          players' = S.map (\p ->
-            if _pid p == _pid player
-            then p { _pcards = hand' }
-            else p) _gstPlayers
-      in
-        -- TODO: use lenses
-        modify' (\s -> s
-          { _gstCardExchange = cardExchange'
-          , _gstPlayers = players'
-          })
+      let newHand = L.delete card (_pcards player)
+       in do
+         gstCardExchange %= M.insert (_pid player) card
 
-  return ()
+         gstPlayers %=
+           S.map (\p -> if _pid p == _pid player
+                        then set pcards newHand p
+                        else p)
 
 showGameState :: GameState -> String
 showGameState gameState = unlines
@@ -399,13 +382,9 @@ checkPlayerTurn player = do
 
 mkDeck :: GameMonad Deck
 mkDeck = do
-  deck <- shuffleM defaultDeck
-  modify' $ addDeck deck
+  deck    <- shuffleM defaultDeck
+  gstDeck .= deck
   return deck
-
-  where
-    addDeck :: Deck -> GameState -> GameState
-    addDeck deck s = s { _gstDeck = deck }
 
 initGame :: GameMonad ()
 initGame = mkDeck >> deal
@@ -421,10 +400,9 @@ deal = do
 
     Just (deck', hands) -> do
       tell ["Dealing cards from deck"]
-      modify' (\s -> s { _gstDeck    = deck'
-                       , _gstPlayers = giveHand hands _gstPlayers
-                       , _gstMode    = CardExchange
-                       })
+      gstPlayers %= giveHand hands
+      gstMode .= CardExchange
+      gstDeck .= deck'
 
   where
     giveHand :: [Hand] -> S.Set Player -> S.Set Player
@@ -442,13 +420,8 @@ join = do
     Just playerId -> do
       player@Player {..} <- mkPlayer playerId emptyHand defaultPegs
       tell ["Adding new Player to the Game: " ++ show player]
-      modify' $ addPlayer player
+      gstPlayers %= S.insert player
       return (_puuid, _pid)
-
-  where
-    -- TODO: use lens to remove the boilerplate
-    addPlayer :: Player -> GameState -> GameState
-    addPlayer player s = s { _gstPlayers = S.insert player (_gstPlayers s) }
 
 readyToPlay :: GameMonad Bool
 readyToPlay = do

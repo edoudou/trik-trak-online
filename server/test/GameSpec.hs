@@ -15,7 +15,7 @@ import           Test.Tasty.Hspec      (Spec, before, beforeAll, describe, it,
                                         shouldBe, shouldContain,
                                         shouldMatchList, shouldNotContain)
 
-import           Data.Game
+import           Data.Game             hiding (pid)
 import           Game                  (exchangeCard, getState, initGame, join,
                                         mkDeck, quitGame)
 import           GameMonad             (GameMonad, evalGameMonad, execGameMonad)
@@ -170,7 +170,7 @@ joinNPlayers n = do
   (gameEnv, gameState) <- setupGameEnvState
   return $ execGameMonad gameEnv gameState $ replicateM n join
 
--- TODO
+-- TODO:finish
 exchangeCardForPlayerId :: PlayerId -> GameMonad ()
 exchangeCardForPlayerId pid = do
   gameState <- get

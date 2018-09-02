@@ -97,8 +97,8 @@ withPlayerTurn :: Player -> GameMonad a -> GameMonad a
 withPlayerTurn player action = do
   b <- checkPlayerTurn player
   if b
-  then action
-  else throwError $ WrongPlayerTurn (_puuid player)
+    then action
+    else throwError $ WrongPlayerTurn (_puuid player)
 
 gameErrorToServantError :: GameError -> ServantErr
 gameErrorToServantError gameError@(DG.Unauthorized _)  =
@@ -172,11 +172,11 @@ fetchConfig :: Environment -> IO Config
 fetchConfig env = do
   gen          <- getStdGen
   loggerConfig <- Logger.fetchConfig env
-  return $ Config
-    { cStdGen = gen
-    , cGameEnv = defaultGameEnvironment
+  return Config
+    { cStdGen       = gen
+    , cGameEnv      = defaultGameEnvironment
     , cEnvironnment = env
-    , cLogger = loggerConfig
+    , cLogger       = loggerConfig
     }
 
 startServer :: Config -> IO Handle

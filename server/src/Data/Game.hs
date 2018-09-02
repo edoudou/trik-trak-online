@@ -14,6 +14,10 @@ module Data.Game
   , GameError (..)
 
   , GameEnvironment (..)
+  -- ** Lenses for GameEnvironment
+  , geNPlayers
+  , geTeams
+
   , defaultGameEnvironment
 
   , GameResult (..)
@@ -25,6 +29,12 @@ module Data.Game
   , PlayerUUID
   , PlayerId (..)
   , Player (..)
+  -- ** Lenses for Player
+  , pcards
+  , ppegs
+  , pid
+  , puuid
+
   , Team (..)
 
   , Action (..)
@@ -69,9 +79,25 @@ module Data.Game
   , setHidden
 
   , FilteredGameState (..)
+  -- ** Lenses for FilteredGameState
+  , fgstActions
+  , fgstCards
+  , fgstHistory
+  , fgstMode
+  , fgstPegs
+  , fgstTeams
+
   , filterGameState
 
   , GameState (..)
+  -- ** Lenses for GameState
+  , gstCardExchange
+  , gstDeck
+  , gstGen
+  , gstMode
+  , gstPlayers
+  , gstRoundPlayerTurn
+
   , emptyGameState
   , isOver
   , winner
@@ -536,8 +562,6 @@ data GameState = GameState
   }
   deriving (Show)
 
-makeLenses ''GameState
-
 emptyGameState :: StdGen -> GameState
 emptyGameState g = GameState
   { _gstMode            = JoinWait
@@ -582,16 +606,14 @@ data FilteredGameState = FilteredGameState
   }
   deriving (Eq, Show, Generic)
 
-makeLenses ''FilteredGameState
-
 instance ToJSON FilteredGameState where
   toJSON = genericToJSON defaultOptions {
-      fieldLabelModifier = map C.toLower . drop 2
+      fieldLabelModifier = map C.toLower . drop 5
     }
 
 instance FromJSON FilteredGameState where
   parseJSON = genericParseJSON defaultOptions {
-      fieldLabelModifier = map C.toLower . drop 2
+      fieldLabelModifier = map C.toLower . drop 5
     }
 
 findPlayer :: GameState -> PlayerUUID -> Maybe Player
@@ -694,3 +716,8 @@ dealCards deck =
 
     deck' :: Deck
     deck' = drop 16 deck
+
+makeLenses ''GameEnvironment
+makeLenses ''FilteredGameState
+makeLenses ''GameState
+makeLenses ''Player

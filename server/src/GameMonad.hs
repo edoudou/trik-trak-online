@@ -20,8 +20,10 @@ import           Control.Monad.Trans.State  (StateT, runStateT)
 import           Control.Monad.Trans.Writer (WriterT, runWriterT)
 import           Control.Monad.Writer.Class (MonadWriter)
 
+import           Control.Lens
+
 import           Data.Game                  (GameEnvironment, GameError,
-                                             GameLog, GameState, _gstGen)
+                                             GameLog, GameState, gstGen)
 
 
 newtype GameMonad a
@@ -47,7 +49,9 @@ runGameMonad
   -> GameMonad a
   -> (Either GameError (a, GameState), GameLog)
 runGameMonad gameEnv gameState (GameMonad action) =
-  (result', logs)
+  ( set (mapped . _2 . gstGen) gen' result
+  , logs
+  )
 
   where
     randomAction = runWriterT
@@ -55,10 +59,7 @@ runGameMonad gameEnv gameState (GameMonad action) =
       $ flip runStateT gameState
       $ runReaderT action gameEnv
 
-    ((result, logs), gen') = runRand randomAction (_gstGen gameState)
-
-    -- TODO: use lens to simplify this boilerplate
-    result' = (\(x, s) -> (x, s { _gstGen = gen' })) <$> result
+    ((result, logs), gen') = runRand randomAction $ view gstGen gameState
 
 evalGameMonadLog
   :: GameEnvironment
