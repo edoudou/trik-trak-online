@@ -1,16 +1,20 @@
+{-# LANGUAGE RecordWildCards     #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
+-- TODO: add export list
 module Game where
 
 import           Control.Monad         (guard, when)
 import           Control.Monad.Except  (throwError)
 import           Control.Monad.State   (get, gets, modify')
 import           Control.Monad.Writer  (tell)
+import           Data.Function         (on)
 import qualified Data.List             as L
 import qualified Data.Map              as M
 import           Data.Maybe            (maybeToList)
 import qualified Data.Set              as S
 import           Data.String           (unlines)
+
 import           System.Random.Shuffle (shuffleM)
 
 
@@ -18,64 +22,155 @@ import           Data.Game
 import           GameMonad
 
 
-play :: Action -> GameMonad ()
-play _  = do
-    _ <- get
-    return ()
-
--- TODO: finish me to be able to play the TakTic game!
 handle :: Action -> GameMonad GameResult
-handle (NPA JoinGame) = join
+handle (NPA JoinGame) = do
+  (uuid, pid) <- join
+  return (NewPlayer uuid pid)
 
-handle (PA player (Exchange card)) = do
-  mCardExchanged <- hasAlreadyExchangedCard player
-  case mCardExchanged of
-    Just c' -> throwError $ CardAlreadyExchanged c' (_uuid player)
-    Nothing -> do
-      tell ["Giving Card " ++ show card ++ " to Player " ++ show (_id player)]
-      giveCard player card
-      canExchange <- canExchangeCards
-      when canExchange $ do
-        gameState <- get
-        tell ["Exchanging cards among players with the following cards: " ++ show (_cardExchange gameState)]
-        performCardExchange
+handle (PA player playerAction@(Exchange card)) =
+  withValidPlayerAction player playerAction $
+    withCardNotAlreadyExchanged player $ do
+      exchangeCard player card
       return Unit
-handle act@(PA player action@(Move card peg position)) = do
-  gameState <- get
-  let playerActions = cardActions (_players gameState) (_id player)
-  if action `L.notElem` playerActions
-  then throwError $ InvalidAction act
-  else do
-    tell ["Performing valid action: " ++ show action]
-    -- TODO: implement movePeg
-    -- TODO: add some logging
-    -- movePeg player peg position >> useCard card >> return Unit
+
+handle (PA player playerAction@(Move card peg position)) =
+  withValidPlayerAction player playerAction $ do
+    move player peg position
+    useCard player card
     return Unit
 
-handle (PA p QuitGame)                  = quitGame p >> return Unit
-handle _                                = undefined
+handle (PA player playerAction@(SwitchPegs pid peg1 peg2)) =
+  withValidPlayerAction player playerAction $ do
+    performSwitchPegs (player, peg1) (pid, peg2)
+    useCard player Switch
+    return Unit
+
+handle (PA player playerAction@(Discard card)) =
+  withValidPlayerAction player playerAction $ do
+    useCard player card
+    return Unit
+
+handle (PA player QuitGame) =
+  withValidPlayerAction player QuitGame $ do
+    quitGame player
+    return Unit
+
+performSwitchPegs :: (Player, Peg) -> (PlayerId, Peg) -> GameMonad ()
+performSwitchPegs (player1, peg1) (pid2, peg2) = do
+  gameState <- get
+  case findPlayerByPlayerId gameState pid2 of
+    Nothing ->
+      throwError $ PlayerIdNotFound pid2
+
+    Just player2 ->
+      let (newPlayer1, newPlayer2) = switchPegs (player1, peg1) (player2, peg2)
+      in modify' (\s -> s { _players = S.insert newPlayer1 (S.insert newPlayer2 (S.delete player2 (S.delete player1 (_players s))))})
+      -- TODO: use lens to simplify
+
+
+switchPegs :: (Player, Peg) -> (Player, Peg) -> (Player, Player)
+switchPegs (player1, peg1) (player2, peg2) =
+  ( player1 { _pegs = peg2 : L.delete peg1 (_pegs player1)}
+  , player2 { _pegs = peg1 : L.delete peg2 (_pegs player2)}
+  )
+
+isValidPlayerAction :: GameState -> Player -> PlayerAction -> Bool
+isValidPlayerAction GameState {..} Player {..} action =
+  case _mode of
+    Play pid     -> (pid == _id) && action `L.elem` cardActions _players _id
+    CardExchange -> action `L.elem` (Exchange <$> _cards)
+    _            -> False
+
+withValidPlayerAction :: Player -> PlayerAction -> GameMonad a -> GameMonad a
+withValidPlayerAction player playerAction action = do
+  gameState <- get
+  isValid   <- pure $ isValidPlayerAction gameState player playerAction
+  if isValid
+     then do
+       tell ["Performing valid PlayerAction" ++ show playerAction]
+       action
+     else do
+       tell ["Invalid PlayerAction: " ++ show playerAction]
+       throwError $ InvalidAction (PA player playerAction)
+
+-- Assumption: valid player action
+move :: Player -> Peg -> Position -> GameMonad ()
+move player peg position =
+  case position of
+    TP _  -> movePeg player peg position
+    BP bp -> do
+      pegEaten <- eatPeg bp
+      when pegEaten $ tell ["Eating Peg located at this position: " ++ show bp]
+      movePeg player peg position
+
+-- Assumption: valid player action
+-- TODO: use lens to simplify nested record updates
+movePeg :: Player -> Peg -> Position -> GameMonad ()
+movePeg player@Player {..} peg position =
+  modify' (\s -> s { _players = S.insert newPlayer (S.delete player (_players s))})
+
+  where
+    newPeg :: Peg
+    newPeg =
+      case position of
+        BP bp -> PegBoard bp (if bp == startBoardPosition _id then Stake else Normal)
+        TP tp -> PegTarget tp
+
+    newPegs :: [Peg]
+    newPegs = newPeg : L.delete peg _pegs
+
+    newPlayer :: Player
+    newPlayer = player { _pegs = newPegs }
+
+
+-- TODO: use lens to simplify
+-- Assumption: valid player action
+eatPeg :: BoardPosition -> GameMonad Bool
+eatPeg bp = do
+  gameState <- get
+  modify' (\s -> s { _players = S.fromList (newPlayers (S.elems (_players s)))})
+  gameState' <- get
+  return $ on (/=) _players gameState gameState'
+
+  where
+    eatPegForPlayer :: Player -> Player
+    eatPegForPlayer p = p { _pegs = eatPeg' <$> _pegs p }
+
+    eatPeg' :: Peg -> Peg
+    eatPeg' peg@(PegBoard bp' _) = if bp == bp' then PegHome else peg
+    eatPeg' peg                  = peg
+
+    newPlayers :: [Player] -> [Player]
+    newPlayers ps = eatPegForPlayer <$> ps
+
+withCardNotAlreadyExchanged :: Player -> GameMonad a -> GameMonad a
+withCardNotAlreadyExchanged player action = do
+  mCardExchanged <- hasAlreadyExchangedCard player
+  case mCardExchanged of
+    Just c' -> do
+      tell ["Card already exchanged by player: " ++ show (_id player)]
+      throwError $ CardAlreadyExchanged c' (_uuid player)
+
+    Nothing -> do
+      tell ["Card not already exchanged by player: " ++ show (_id player)]
+      action
 
 exchangeCard :: Player -> Card -> GameMonad ()
 exchangeCard player card = do
-  mCardExchanged <- hasAlreadyExchangedCard player
-  case mCardExchanged of
-    Just c' -> throwError $ CardAlreadyExchanged c' (_uuid player)
-    Nothing -> do
-      tell ["Giving Card " ++ show card ++ " to Player " ++ show (_id player)]
-      giveCard player card
-      canExchange <- canExchangeCards
-      when canExchange $ do
-        gameState <- get
-        tell ["Exchanging cards among players with the following cards: " ++ show (_cardExchange gameState)]
-        performCardExchange
-      return ()
+  tell ["Giving Card " ++ show card ++ " to Player " ++ show (_id player)]
+  giveCard player card
+  canExchangeAmongPlayers <- canExchangeCardsAmongPlayers
+  when canExchangeAmongPlayers performCardExchange
 
-movePeg :: Player -> Peg -> Position -> GameMonad ()
-movePeg player peg position = return ()
-
--- TODO
+-- TODO: use lens to simplify
+-- TODO: rename to discardCard?
 useCard :: Player -> Card -> GameMonad ()
-useCard player card = return ()
+useCard player card =
+  modify' (\s -> s { _players = S.fromList (newPlayer : L.delete player (S.elems (_players s)))})
+
+  where
+    newPlayer :: Player
+    newPlayer = player { _cards = L.delete card (_cards player) }
 
 -- TODO: add state for players who left
 quitGame :: Player -> GameMonad ()
@@ -95,7 +190,7 @@ cardAction players pid peg card = moves ++ switches
 
     moves :: [PlayerAction]
     moves = Move card peg <$> filter (blockedByStakePeg players pid peg)
-                                     (move pid card peg)
+                                     (movePegWithCard pid card peg)
 
 cardActions :: S.Set Player -> PlayerId -> [PlayerAction]
 cardActions players pid =
@@ -166,12 +261,12 @@ blockedByStakePeg players pid peg to =
         PegTarget tp -> return $ TP tp
         _            -> []
 
-move :: PlayerId -> Card -> Peg -> [Position]
-move pid card PegHome
+movePegWithCard :: PlayerId -> Card -> Peg -> [Position]
+movePegWithCard pid card PegHome
   | startCard card = return $ BP (startBoardPosition pid)
   | otherwise      = []
-move _ card (PegTarget tp) = TP <$> maybeToList (moveTarget card tp)
-move pid card (PegBoard bp _) =
+movePegWithCard _ card (PegTarget tp) = TP <$> maybeToList (moveTarget card tp)
+movePegWithCard pid card (PegBoard bp _) =
   BP bp' : (TP <$> maybeToList tp')
   where
     bp' :: BoardPosition
@@ -219,14 +314,15 @@ startBoardPosition P4 = BoardPosition 48
 hasAlreadyExchangedCard :: Player -> GameMonad (Maybe Card)
 hasAlreadyExchangedCard player = gets $ M.lookup (_id player) . _cardExchange
 
-canExchangeCards :: GameMonad Bool
-canExchangeCards = do
+canExchangeCardsAmongPlayers :: GameMonad Bool
+canExchangeCardsAmongPlayers = do
   gameState <- get
   return $ length (M.keys (_cardExchange gameState)) == 4
 
 performCardExchange :: GameMonad ()
 performCardExchange = do
   gameState <- get
+  tell ["Exchanging cards among players with the following cards: " ++ show (_cardExchange gameState)]
   -- TODO: Use lenses to clean up
   modify' (\s -> s
             { _players = exchangeCards' (_players gameState) (_cardExchange gameState)
@@ -242,22 +338,22 @@ performCardExchange = do
         Nothing   -> return player
         Just card -> return player { _cards = card : _cards player }
 
-giveCard :: Player -> Card -> GameMonad GameResult
+giveCard :: Player -> Card -> GameMonad ()
 giveCard player card = do
 
-  gameState <- get
+  GameState {..} <- get
 
   case L.find (== card) (_cards player) of
     Nothing ->
       throwError $ CardNotAvailabe (_uuid player) card
 
     Just _ ->
-      let cardExchange' = M.insert (_id player) card (_cardExchange gameState)
+      let cardExchange' = M.insert (_id player) card _cardExchange
           hand' = L.delete card (_cards player)
           players' = S.map (\p ->
             if _id p == _id player
             then p { _cards = hand' }
-            else p) (_players gameState)
+            else p) _players
       in
         -- TODO: use lenses
         modify' (\s -> s
@@ -265,7 +361,7 @@ giveCard player card = do
           , _players = players'
           })
 
-  return Unit
+  return ()
 
 showGameState :: GameState -> String
 showGameState gameState = unlines
@@ -336,7 +432,7 @@ deal = do
       S.fromList [p { _cards = h } | (h, p) <- zip hands (S.elems players)]
 
 
-join :: GameMonad GameResult
+join :: GameMonad (PlayerUUID, PlayerId)
 join = do
 
   gameState <- get
@@ -351,7 +447,7 @@ join = do
       tell ["Adding new Player to the Game: " ++ show player]
       modify' $ addPlayer player
       when (length (_players gameState) == 3) initGame
-      return $ NewPlayer (_uuid player) (_id player)
+      return (_uuid player, _id player)
 
   where
     -- TODO: use lens to remove the boilerplate

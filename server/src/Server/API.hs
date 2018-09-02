@@ -49,7 +49,7 @@ import           System.Random            (StdGen, getStdGen)
 import           Data.Game
 import qualified Data.Game                as DG
 import           Game                     (checkPlayerTurn, getState, handle,
-                                           join, showGameState)
+                                           showGameState)
 import           GameMonad                (GameMonad, runGameMonad)
 import qualified Logger
 import           Server.Environment       (Environment)
@@ -79,7 +79,7 @@ healthHandler :: GameMonad T.Text
 healthHandler = return "OK"
 
 joinHandler :: GameMonad GameResult
-joinHandler = join
+joinHandler = handle (NPA JoinGame)
 
 stateHandler :: PlayerUUID -> GameMonad FilteredGameState
 stateHandler uuid = tell [show uuid] >> getState uuid

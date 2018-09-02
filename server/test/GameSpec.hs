@@ -4,23 +4,22 @@
 
 module GameSpec where
 
-import           Control.Monad        (forM, forM_, replicateM, void)
-import           Control.Monad.State  (get)
-import           Control.Monad.Writer (tell)
-import qualified Data.Set as S
-import           System.Random        (getStdGen)
+import           Control.Monad         (forM, forM_, replicateM, void)
+import           Control.Monad.State   (get)
+import qualified Data.Set              as S
+import           System.Random         (getStdGen)
 
-import           Data.UUID.V4         (nextRandom)
-import           Test.Tasty.Hspec     (Spec, before, beforeAll, describe, it,
-                                       shouldBe, shouldContain, shouldNotContain, shouldMatchList,
-                                       shouldNotBe)
+import           Data.UUID.V4          (nextRandom)
 import           System.Random.Shuffle (shuffleM)
+import           Test.Tasty.Hspec      (Spec, before, beforeAll, describe, it,
+                                        shouldBe, shouldContain,
+                                        shouldMatchList, shouldNotContain)
 
 import           Data.Game
-import           Game                 (quitGame, exchangeCard, getState, join, mkDeck)
-import           GameMonad            (GameMonad, evalGameMonad, execGameMonad,
-                                       execGameMonadState)
-import           SpecUtils            (assertAllPlayerIds)
+import           Game                  (exchangeCard, getState, join, mkDeck,
+                                        quitGame)
+import           GameMonad             (GameMonad, evalGameMonad, execGameMonad)
+import           SpecUtils             (allPlayerIds)
 
 spec :: Spec
 spec =
@@ -43,11 +42,11 @@ spec =
 
         it "Game Mode is `Winner`" $ \(gameEnv, gameState) ->
           case evalGameMonad gameEnv gameState quitAction of
-            Right (player, GameState {..}) ->
+            Right (_, GameState {..}) ->
               case _mode of
                 Winner _ -> True `shouldBe` True
                 _        -> fail "Error: wrong game mode"
-            Left e -> fail "Error"
+            Left _ -> fail "Error"
 
         it "the player leaving the game is not among the winners" $ \(gameEnv, gameState) ->
           case evalGameMonad gameEnv gameState quitAction of
@@ -56,20 +55,20 @@ spec =
                 Winner (Team pid1 pid2) ->
                   [pid1, pid2] `shouldNotContain` [_id]
                 _ -> fail "Error: wrong game mode"
-            Left e -> fail "Error"
+            Left _ -> fail "Error"
 
     describe "Game.join" $ do
 
       before (joinNPlayers 1) $
         describe "1 attempt" $
           it "allows 1 player to join" $ \case
-            Right [NewPlayer _ pid] -> pid `shouldBe` P1
+            Right [(_, pid)] -> pid `shouldBe` P1
             _                       -> fail "Error"
 
       before (joinNPlayers 4) $
         describe "4 attempts" $
           it "allows 4 players to join" $ \case
-            Right xs -> assertAllPlayerIds xs
+            Right xs -> snd <$> xs `shouldContain` allPlayerIds
             _        -> fail "Error"
 
       before (joinNPlayers 5) $
@@ -112,7 +111,7 @@ spec =
         describe "4 players" $ do
 
           it "returns 4 PlayerIds" $ \case
-            Right xs -> (fst <$> xs) `shouldMatchList` [P1, P2, P3, P4]
+            Right xs -> (fst <$> xs) `shouldMatchList` allPlayerIds
             _        -> fail "Error"
 
           it "Game Mode is CardExchange" $ \case
@@ -122,12 +121,12 @@ spec =
 
           it "players have cards" $ \case
             Right xs -> forM_ (snd <$> xs) $ \FilteredGameState {..} ->
-              fst <$> _fcards `shouldMatchList`  [P1, P2, P3, P4]
+              fst <$> _fcards `shouldMatchList` allPlayerIds
             _ -> fail "Error"
 
           it "players have pegs" $ \case
             Right xs -> forM_ (snd <$> xs) $ \FilteredGameState {..} ->
-              fst <$> _fpegs `shouldMatchList`  [P1, P2, P3, P4]
+              fst <$> _fpegs `shouldMatchList` allPlayerIds
             _ -> fail "Error"
 
 
@@ -139,7 +138,7 @@ joinAndGetState = do
   where
     gameAction :: GameMonad FilteredGameState
     gameAction = do
-      NewPlayer uuid pid <- join
+      (uuid, _) <- join
       getState uuid
 
 -- TODO: refactor to only run in the GameMonad
@@ -151,7 +150,7 @@ joinNPlayersAndGetStates n = do
     gameAction :: GameMonad [(PlayerId, FilteredGameState)]
     gameAction = do
       players <- replicateM n join
-      forM players $ \(NewPlayer uuid pid) -> do
+      forM players $ \(uuid, pid) -> do
         filteredState <- getState uuid
         return (pid, filteredState)
 
@@ -163,11 +162,12 @@ setupGameEnvState = do
   return (defaultGameEnvironment, emptyGameState g)
 
 -- TODO: refactor to only run in the GameMonad
-joinNPlayers :: Int -> IO (Either GameError [GameResult])
+joinNPlayers :: Int -> IO (Either GameError [(PlayerUUID, PlayerId)])
 joinNPlayers n = do
   (gameEnv, gameState) <- setupGameEnvState
   return $ execGameMonad gameEnv gameState $ replicateM n join
 
+-- TODO
 exchangeCardForPlayerId :: PlayerId -> GameMonad ()
 exchangeCardForPlayerId pid = do
   gameState <- get

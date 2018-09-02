@@ -21,8 +21,8 @@ import           Test.Tasty.Hspec          (Expectation, Spec, afterAll_,
 
 import           Data.Game                 (FilteredGameState (..),
                                             GameResult (..), GameState,
-                                            Mode (..), PlayerAction,
-                                            PlayerId (..), PlayerUUID,
+                                            Mode (..),
+                                            PlayerId (..),
                                             emptyGameState, _fmode, _players)
 import qualified Server.API
 import           Server.Client             (clientHealth, clientJoin,

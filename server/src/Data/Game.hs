@@ -160,11 +160,12 @@ data GameError
   = InvalidAction Action                  -- ^ InvalidAction for given Action and Player
   | JoinTooManyPlayers                    -- ^ Too many players are already in the Game
   | WrongNumberPlayers { errorNPlayers :: !Int }                -- ^ Wrong Number of players
-  | Unauthorized { errorPid :: !PlayerUUID }               -- ^ Unauthorized UUID
-  | WrongPlayerTurn { errorPid :: !PlayerUUID }           -- ^ Wrong player turn
-  | CardNotAvailabe { errorPid :: !PlayerUUID, errorCard :: !Card }       -- ^ Card is not availabe for player
-  | PlayerNotFound { errorPid :: !PlayerUUID }             -- ^ Player Not Found exception
-  | CardAlreadyExchanged {errorCard :: !Card, errorPid :: !PlayerUUID }  -- ^ Card is already exchanged for PlayerUUID
+  | Unauthorized { errorPuuid :: !PlayerUUID }               -- ^ Unauthorized UUID
+  | WrongPlayerTurn { errorPuuid :: !PlayerUUID }           -- ^ Wrong player turn
+  | CardNotAvailabe { errorPuuid :: !PlayerUUID, errorCard :: !Card }       -- ^ Card is not availabe for player
+  | PlayerNotFound { errorPuuid :: !PlayerUUID }             -- ^ Player Not Found exception
+  | PlayerIdNotFound { errorPid :: !PlayerId }             -- ^ Player Not Found exception
+  | CardAlreadyExchanged {errorCard :: !Card, errorPuuid :: !PlayerUUID }  -- ^ Card is already exchanged for PlayerUUID
   deriving (Eq, Show, Generic)
 
 instance ToJSON GameError where
