@@ -1,10 +1,17 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module GameMonad where
+module GameMonad
+  ( GameMonad
+  , runGameMonad
+  , evalGameMonadLog
+  , evalGameMonad
+  , execGameMonad
+  , execGameMonadState
+  )
+  where
 
 import           Control.Monad.Error.Class  (MonadError)
-import           Control.Monad.Random       (MonadRandom, Rand, StdGen,
-                                             runRand)
+import           Control.Monad.Random       (MonadRandom, Rand, StdGen, runRand)
 import           Control.Monad.Reader.Class (MonadReader)
 import           Control.Monad.State.Class  (MonadState)
 import           Control.Monad.Trans.Except (ExceptT, runExceptT)
@@ -13,7 +20,8 @@ import           Control.Monad.Trans.State  (StateT, runStateT)
 import           Control.Monad.Trans.Writer (WriterT, runWriterT)
 import           Control.Monad.Writer.Class (MonadWriter)
 
-import           Data.Game
+import           Data.Game                  (GameEnvironment, GameError,
+                                             GameLog, GameState, _gen)
 
 
 newtype GameMonad a
@@ -51,3 +59,35 @@ runGameMonad gameEnv gameState (GameMonad action) =
 
     -- TODO: use lens to simplify this boilerplate
     result' = (\(x, s) -> (x, s { _gen = gen' })) <$> result
+
+evalGameMonadLog
+  :: GameEnvironment
+  -> GameState
+  -> GameMonad a
+  -> GameLog
+evalGameMonadLog gameEnv gameState action =
+  snd $ runGameMonad gameEnv gameState action
+
+evalGameMonad
+  :: GameEnvironment
+  -> GameState
+  -> GameMonad a
+  -> Either GameError (a, GameState)
+evalGameMonad gameEnv gameState action =
+  fst $ runGameMonad gameEnv gameState action
+
+execGameMonadState
+  :: GameEnvironment
+  -> GameState
+  -> GameMonad a
+  -> Either GameError GameState
+execGameMonadState gameEnv gameState action =
+  snd <$> evalGameMonad gameEnv gameState action
+
+execGameMonad
+  :: GameEnvironment
+  -> GameState
+  -> GameMonad a
+  -> Either GameError a
+execGameMonad gameEnv gameState action =
+  fst <$> evalGameMonad gameEnv gameState action
