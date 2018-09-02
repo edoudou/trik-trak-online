@@ -31,8 +31,8 @@ import           GHC.Generics         (Generic)
 data Mode
   = JoinWait                       -- ^ Waiting for other players to join
   | CardExchange                   -- ^ Exchanging cards between teammates
-  | Winner { modeTeam :: Team }    -- ^ End of the game with a winner team
-  | Play { modePid :: PlayerId }   -- ^ Regular round play with PlayerId playing
+  | Winner { modeTeam :: !Team }    -- ^ End of the game with a winner team
+  | Play { modePid :: !PlayerId }   -- ^ Regular round play with PlayerId playing
   deriving (Eq, Show, Generic)
 
 instance ToJSON Mode where
@@ -81,12 +81,12 @@ defaultGameEnvironment = GameEnvironment (Team P1 P3, Team P2 P4)
 data GameError
   = InvalidAction Action                  -- ^ InvalidAction for given Action and Player
   | JoinTooManyPlayers                    -- ^ Too many players are already in the Game
-  | WrongNumberPlayers { errorNPlayers :: Int }                -- ^ Wrong Number of players
-  | Unauthorized { errorPid :: PlayerUUID }               -- ^ Unauthorized UUID
-  | WrongPlayerTurn { errorPid :: PlayerUUID }           -- ^ Wrong player turn
-  | CardNotAvailabe { errorPid :: PlayerUUID, errorCard :: Card }       -- ^ Card is not availabe for player
-  | PlayerNotFound { errorPid :: PlayerUUID }             -- ^ Player Not Found exception
-  | CardAlreadyExchanged {errorCard :: Card, errorPid :: PlayerUUID }  -- ^ Card is already exchanged for PlayerUUID
+  | WrongNumberPlayers { errorNPlayers :: !Int }                -- ^ Wrong Number of players
+  | Unauthorized { errorPid :: !PlayerUUID }               -- ^ Unauthorized UUID
+  | WrongPlayerTurn { errorPid :: !PlayerUUID }           -- ^ Wrong player turn
+  | CardNotAvailabe { errorPid :: !PlayerUUID, errorCard :: !Card }       -- ^ Card is not availabe for player
+  | PlayerNotFound { errorPid :: !PlayerUUID }             -- ^ Player Not Found exception
+  | CardAlreadyExchanged {errorCard :: !Card, errorPid :: !PlayerUUID }  -- ^ Card is already exchanged for PlayerUUID
   deriving (Eq, Show, Generic)
 
 instance ToJSON GameError where
@@ -95,8 +95,8 @@ instance ToJSON GameError where
 
 data GameResult
   = NewPlayer  -- ^ NewPlayer has been created
-    { gameResultUuid :: PlayerUUID
-    , gameResultPid :: PlayerId
+    { gameResultUuid :: !PlayerUUID
+    , gameResultPid :: !PlayerId
     }
   | Unit       -- ^ Success but nothing to return
   deriving (Eq, Show, Generic)
@@ -114,8 +114,8 @@ instance FromJSON GameResult where
 type PlayerUUID = UUID
 
 data Action
-  = PA Player PlayerAction
-  | NPA NoPlayerAction
+  = PA !Player !PlayerAction
+  | NPA !NoPlayerAction
   deriving (Eq, Show, Generic)
 
 instance ToJSON Action where
@@ -125,18 +125,18 @@ instance ToJSON Action where
     ]
 
 data PlayerAction
-  = Exchange { pACard :: Card }           -- ^ Exchange Card to PlayerId
+  = Exchange { pACard :: !Card }           -- ^ Exchange Card to PlayerId
   | Move  -- ^ Move Peg with Card to new Position
-    { pACard :: Card
-    , pAPeg :: Peg
-    , pAPosition :: Position
+    { pACard :: !Card
+    , pAPeg :: !Peg
+    , pAPosition :: !Position
     }
   | Discard  -- ^ Discard Card
-    { pACard :: Card }
+    { pACard :: !Card }
   | SwitchPegs -- ^ Switch two pegs inclluding Player Id
-    { pAPid :: PlayerId
-    , pAFrom :: Peg
-    , pATo :: Peg
+    { pAPid :: !PlayerId
+    , pAFrom :: !Peg
+    , pATo :: !Peg
     }
   | QuitGame                -- ^ Quit the game
   deriving (Eq, Show, Generic)
@@ -161,10 +161,10 @@ instance ToJSON NoPlayerAction where
 
 -- |Representing a Player in the Game
 data Player = Player
-  { _uuid  :: PlayerUUID -- ^ Player uuid
-  , _id    :: PlayerId   -- ^ Player id
-  , _cards :: Hand       -- ^ Hand of cards
-  , _pegs  :: [Peg]      -- ^ Pegs
+  { _uuid  :: !PlayerUUID -- ^ Player uuid
+  , _id    :: !PlayerId   -- ^ Player id
+  , _cards :: !Hand       -- ^ Hand of cards
+  , _pegs  :: !([Peg])      -- ^ Pegs
   }
   deriving (Eq, Show)
 
@@ -217,30 +217,6 @@ instance FromJSON Position where
       fieldLabelModifier = map C.toLower . drop 2
     }
 
--- instance FromJSON Position where
---   parseJSON = withObject "Position" $ \o -> do
---     positionType :: String <- o .: "type"
---     position <- o .: "position"
---     case positionType of
---       "Board" ->
---         case boardPosition position of
---           Nothing -> fail "Error Parsing BoardPosition"
---           Just bp -> return (BP bp)
---       "Target" ->
---         case targetPosition position of
---           Nothing -> fail "Error Parsing TargetPosition"
---           Just tp -> return (TP tp)
-
--- instance ToJSON Position where
---   toJSON (BP bp) = object
---     [ "type" .= ("Board" :: T.Text)
---     , "position" .= bp
---     ]
---   toJSON (TP tp) = object
---     [ "type" .= ("Target" :: T.Text)
---     , "position" .= tp
---     ]
-
 newtype BoardPosition
   = BoardPosition Int  -- ^ Position on the Board
   deriving (Eq, Show, Ord)
@@ -251,7 +227,6 @@ startPosition = BoardPosition 0
 endPosition :: BoardPosition
 endPosition = BoardPosition $ 4 * 16 - 1
 
--- TODO: remove
 runBoardPosition :: BoardPosition -> Int
 runBoardPosition (BoardPosition x) = x
 
@@ -291,11 +266,11 @@ targetPosition n
 
 data Peg
   = PegBoard   -- ^ On the board at position with mode
-    { pegBoardPosition :: BoardPosition
-    , pegPegMode       :: PegMode
+    { pegBoardPosition :: !BoardPosition
+    , pegPegMode       :: !PegMode
     }
   | PegTarget  -- ^ On the target at position
-    { pegTargetPosition :: TargetPosition }
+    { pegTargetPosition :: !TargetPosition }
   | PegHome    -- ^ Home
   deriving (Eq, Show, Generic)
 
@@ -357,7 +332,7 @@ instance FromJSON PlayerId where
       i   <- toBoundedInteger n
       intToPlayerId i
 
-data Team = Team PlayerId PlayerId
+data Team = Team !PlayerId !PlayerId
   deriving (Eq, Show, Ord)
 
 instance ToJSON Team where
@@ -418,6 +393,7 @@ cardToInt Ten    = 10
 cardToInt Switch = 11
 cardToInt Twelve = 12
 
+-- TODO: use Maybe Int instead to signal that switch does not move pegs
 cardToMove :: Card -> Int
 cardToMove One    = 1
 cardToMove Two    = 2
@@ -464,14 +440,14 @@ mkNextPlayerId xs
     inc = (+1)
 
 data GameState = GameState
-  { _players         :: S.Set Player      -- ^ Set of players in the game
-  , _roundPlayerTurn :: PlayerId -- ^ Round Player Turn
-  , _deck            :: Deck              -- ^ Current deck of card
-  , _mode            :: Mode              -- ^ Mode of the Game
-  , _teams           :: (Team, Team)      -- ^ Teams of the game
+  { _players         :: !(S.Set Player)      -- ^ Set of players in the game
+  , _roundPlayerTurn :: !PlayerId -- ^ Round Player Turn
+  , _deck            :: !Deck              -- ^ Current deck of card
+  , _mode            :: !Mode              -- ^ Mode of the Game
+  , _teams           :: !(Team, Team)      -- ^ Teams of the game
   -- TODO: use a type to abstract over M.Map PlayerId Card
-  , _cardExchange    :: M.Map PlayerId Card  -- ^ PlayerId exchanges Card
-  , _gen             :: StdGen              -- ^ StdGen
+  , _cardExchange    :: !(M.Map PlayerId Card)  -- ^ PlayerId exchanges Card
+  , _gen             :: !StdGen              -- ^ StdGen
   }
   deriving (Show)
 
@@ -489,7 +465,7 @@ emptyGameState g = GameState
 -- TODO: Do not export constructors
 -- TODO: Use a newType around Maybe
 data Visibility a
-  = Visible { visibilityValue :: a }    -- ^ Visible Element
+  = Visible { visibilityValue :: !a }    -- ^ Visible Element
   | Hidden       -- ^ Hidden Element
   deriving (Eq, Show, Ord, Generic)
 
@@ -511,12 +487,12 @@ instance FromJSON a => FromJSON (Visibility a) where
 
 -- |State of the game seen by a given player
 data FilteredGameState = FilteredGameState
-  { _fmode    :: Mode                             -- ^ Game Mode
-  , _fteams   :: (Team, Team)                     -- ^ Teams
-  , _fcards   :: [(PlayerId, [Visibility Card])]  -- ^ Player's cards
-  , _fpegs    :: [(PlayerId, [Peg])]              -- ^ Player's peg
-  , _factions :: [PlayerAction]                   -- ^ Actions that can be performed
-  , _fhistory :: [PlayerAction]                   -- ^ History of all Actions performed so far
+  { _fmode    :: !Mode                             -- ^ Game Mode
+  , _fteams   :: !(Team, Team)                     -- ^ Teams
+  , _fcards   :: ![(PlayerId, [Visibility Card])]  -- ^ Player's cards
+  , _fpegs    :: ![(PlayerId, [Peg])]              -- ^ Player's peg
+  , _factions :: ![PlayerAction]                   -- ^ Actions that can be performed
+  , _fhistory :: ![PlayerAction]                   -- ^ History of all Actions performed so far
   }
   deriving (Eq, Show, Generic)
 
@@ -535,6 +511,13 @@ findPlayer s uuid = L.find ((== uuid) . _uuid) players
   where
     players :: [Player]
     players = S.elems (_players s)
+
+findPlayerByPlayerId :: GameState -> PlayerId -> Maybe Player
+findPlayerByPlayerId s pid = L.find ((== pid) . _id) players
+  where
+    players :: [Player]
+    players = S.elems (_players s)
+
 
 getPlayerUUIDs :: GameState -> S.Set PlayerUUID
 getPlayerUUIDs = S.map _uuid . _players
