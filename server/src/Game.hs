@@ -6,6 +6,7 @@ module Game where
 
 import           Control.Monad         (guard, when)
 import           Control.Monad.Except  (throwError)
+import           Control.Monad.Reader  (ask)
 import           Control.Monad.State   (get, gets, modify')
 import           Control.Monad.Writer  (tell)
 import           Data.Function         (on)
@@ -19,12 +20,14 @@ import           System.Random.Shuffle (shuffleM)
 
 
 import           Data.Game
-import           GameMonad
+import           GameMonad (GameMonad)
 
 
 handle :: Action -> GameMonad GameResult
 handle (NPA JoinGame) = do
-  (uuid, pid) <- join
+  (uuid, pid)       <- join
+  isGameReadyToPlay <- readyToPlay
+  when isGameReadyToPlay initGame
   return (NewPlayer uuid pid)
 
 handle (PA player playerAction@(Exchange card)) =
@@ -66,7 +69,6 @@ performSwitchPegs (player1, peg1) (pid2, peg2) = do
       let (newPlayer1, newPlayer2) = switchPegs (player1, peg1) (player2, peg2)
       in modify' (\s -> s { _players = S.insert newPlayer1 (S.insert newPlayer2 (S.delete player2 (S.delete player1 (_players s))))})
       -- TODO: use lens to simplify
-
 
 switchPegs :: (Player, Peg) -> (Player, Peg) -> (Player, Player)
 switchPegs (player1, peg1) (player2, peg2) =
@@ -278,7 +280,7 @@ movePegWithCard pid card (PegBoard bp _) =
 switch :: S.Set Player -> PlayerId -> Card -> Peg -> [PlayerAction]
 switch players pid Switch peg@(PegBoard _ _) = do
   player <- S.elems players
-  ppeg <- _pegs player
+  ppeg   <- _pegs player
   guard (onBoard ppeg)
   guard (_id player /= pid && pegMode ppeg == Stake)
   return $ SwitchPegs (_id player) peg ppeg
@@ -312,31 +314,33 @@ startBoardPosition P3 = BoardPosition 32
 startBoardPosition P4 = BoardPosition 48
 
 hasAlreadyExchangedCard :: Player -> GameMonad (Maybe Card)
-hasAlreadyExchangedCard player = gets $ M.lookup (_id player) . _cardExchange
+hasAlreadyExchangedCard Player {..} = gets $ M.lookup _id . _cardExchange
 
 canExchangeCardsAmongPlayers :: GameMonad Bool
 canExchangeCardsAmongPlayers = do
-  gameState <- get
-  return $ length (M.keys (_cardExchange gameState)) == 4
+  GameState       {..} <- get
+  GameEnvironment {..} <- ask
+  return $ length (M.keys _cardExchange) == _geNPlayers
 
 performCardExchange :: GameMonad ()
 performCardExchange = do
-  gameState <- get
-  tell ["Exchanging cards among players with the following cards: " ++ show (_cardExchange gameState)]
+  GameState {..} <- get
+  tell ["Exchanging cards among players with the following cards: " ++ show _cardExchange]
   -- TODO: Use lenses to clean up
   modify' (\s -> s
-            { _players = exchangeCards' (_players gameState) (_cardExchange gameState)
-            , _cardExchange = M.empty
-            , _mode = Play (_roundPlayerTurn s)
-            , _roundPlayerTurn = nextPlayer (_roundPlayerTurn s)
+            { _players         = exchangeCards' _players _cardExchange
+            , _cardExchange    = M.empty
+            , _mode            = Play (nextPlayer _roundPlayerTurn)
+            , _roundPlayerTurn = nextPlayer _roundPlayerTurn
             })
+
   where
     exchangeCards' :: S.Set Player -> M.Map PlayerId Card -> S.Set Player
     exchangeCards' players cardsToExchange = S.fromList $ do
-      player <- S.elems players
-      case M.lookup (partner (_id player)) cardsToExchange of
+      player@Player {..} <- S.elems players
+      case M.lookup (partner _id) cardsToExchange of
         Nothing   -> return player
-        Just card -> return player { _cards = card : _cards player }
+        Just card -> return player { _cards = card : _cards }
 
 giveCard :: Player -> Card -> GameMonad ()
 giveCard player card = do
@@ -404,26 +408,22 @@ mkDeck = do
     addDeck deck s = s { _deck = deck }
 
 initGame :: GameMonad ()
-initGame = do
-  checkPlayerNumber 4
-  mkDeck
-  deal
-  return ()
+initGame = mkDeck >> deal
 
 deal :: GameMonad ()
 deal = do
-  gameState <- get
-  case dealCards (_deck gameState) of
+  GameState {..} <- get
+  case dealCards _deck of
     Nothing -> do
       tell ["Not enough cards in Deck, making a new Deck"]
       mkDeck
-      deal
+      deal    -- Deal again
 
     Just (deck', hands) -> do
       tell ["Dealing cards from deck"]
-      modify' (\s -> s { _deck = deck'
-                       , _players = giveHand hands (_players gameState)
-                       , _mode = CardExchange
+      modify' (\s -> s { _deck    = deck'
+                       , _players = giveHand hands _players
+                       , _mode    = CardExchange
                        })
 
   where
@@ -434,25 +434,27 @@ deal = do
 
 join :: GameMonad (PlayerUUID, PlayerId)
 join = do
-
-  gameState <- get
-
-  case mkNextPlayerId (_players gameState) of
+  GameState {..} <- get
+  case mkNextPlayerId _players of
     Nothing       -> do
       tell ["Cannot add a new player, the party is full"]
       throwError JoinTooManyPlayers
-
     Just playerId -> do
-      player <- mkPlayer playerId emptyHand defaultPegs
+      player@Player {..} <- mkPlayer playerId emptyHand defaultPegs
       tell ["Adding new Player to the Game: " ++ show player]
       modify' $ addPlayer player
-      when (length (_players gameState) == 3) initGame
-      return (_uuid player, _id player)
+      return (_uuid, _id)
 
   where
     -- TODO: use lens to remove the boilerplate
     addPlayer :: Player -> GameState -> GameState
     addPlayer player s = s { _players = S.insert player (_players s) }
+
+readyToPlay :: GameMonad Bool
+readyToPlay = do
+  GameState       {..} <- get
+  GameEnvironment {..} <- ask
+  return $ length _players == _geNPlayers
 
 getState :: PlayerUUID -> GameMonad FilteredGameState
 getState uuid = do

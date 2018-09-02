@@ -1,4 +1,3 @@
-{-# LANGUAGE DeriveAnyClass      #-}
 {-# LANGUAGE DeriveGeneric       #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -125,8 +124,9 @@ instance FromJSON Mode where
 type GameLog = [String]
 
 -- |Environment
-newtype GameEnvironment = GameEnvironment
-  { teams :: (Team, Team)  -- ^ Player Teams
+data GameEnvironment = GameEnvironment
+  { _geTeams :: !(Team, Team)  -- ^ Player Teams
+  , _geNPlayers :: !Int        -- ^ N Players to join before the game can start
   }
   deriving (Show, Eq)
 
@@ -153,7 +153,11 @@ nextPlayer P3 = P4
 nextPlayer P4 = P1
 
 defaultGameEnvironment :: GameEnvironment
-defaultGameEnvironment = GameEnvironment (Team P1 P3, Team P2 P4)
+defaultGameEnvironment =
+  GameEnvironment
+    { _geTeams    = (Team P1 P3, Team P2 P4)
+    , _geNPlayers = 4
+    }
 
 -- |Error that can be thrown in a `GameMonad` action
 data GameError
@@ -244,7 +248,7 @@ data Player = Player
   { _uuid  :: !PlayerUUID -- ^ Player uuid
   , _id    :: !PlayerId   -- ^ Player id
   , _cards :: !Hand       -- ^ Hand of cards
-  , _pegs  :: !([Peg])      -- ^ Pegs
+  , _pegs  :: ![Peg]      -- ^ Pegs
   }
   deriving (Eq, Show)
 
@@ -533,13 +537,13 @@ data GameState = GameState
 
 emptyGameState :: StdGen -> GameState
 emptyGameState g = GameState
-  { _mode         = JoinWait
-  , _players      = S.empty
+  { _mode            = JoinWait
+  , _players         = S.empty
   , _roundPlayerTurn = P1
-  , _deck         = emptyDeck
-  , _teams        = (Team P1 P3, Team P2 P4)
-  , _cardExchange = M.empty
-  , _gen          = g
+  , _deck            = emptyDeck
+  , _teams           = (Team P1 P3, Team P2 P4)
+  , _cardExchange    = M.empty
+  , _gen             = g
   }
 
 -- TODO: Do not export constructors
